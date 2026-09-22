@@ -355,8 +355,28 @@ def _settings_ctx(db: Session) -> dict:
 
 
 @app.get("/settings", response_class=HTMLResponse)
-def settings_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    return render(request, "settings.html", s=_settings_ctx(db))
+async def settings_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+    auth_servers = (await _auth_servers(db, timeout=5))[0] if services.opn_configured(db) else []
+    return render(request, "settings.html", s=_settings_ctx(db), tpl=services.tunnel_template(db),
+                  auth_servers=auth_servers)
+
+
+@app.post("/settings/tunnel-defaults")
+async def settings_tunnel_defaults(request: Request, db: Session = Depends(get_db),
+                                   admin: Admin = Depends(require_admin)):
+    form = await form_data(request)
+    try:
+        tpl = services.validate_template(form)
+    except ValidationError as exc:
+        flash(request, f"Vorgaben nicht gespeichert: {exc}", "error")
+        return redirect("/settings#vorgaben")
+    for key, value in tpl.items():
+        set_setting(db, f"tpl_{key}", value)
+    audit(db, admin.username, "settings.tunnel_defaults",
+          f"{tpl['proto']}/{tpl['port']}, {tpl['network']}, {tpl['mode']}")
+    db.commit()
+    flash(request, "Vorgaben für neue Tunnel gespeichert.")
+    return redirect("/settings#vorgaben")
 
 
 @app.post("/settings")
@@ -498,9 +518,9 @@ async def _not_found(request: Request, _exc):
     return render(request, "error.html", message="Nicht gefunden.", status_code=404)
 
 
-async def _auth_servers(db: Session) -> tuple[list[str], str | None]:
+async def _auth_servers(db: Session, timeout: float = 30) -> tuple[list[str], str | None]:
     try:
-        async with services.client(db) as c:
+        async with services.client(db, timeout=timeout) as c:
             return await c.auth_servers(), None
     except OPNsenseError as exc:
         return [], str(exc)
@@ -512,9 +532,7 @@ async def tunnel_new_form(request: Request, db: Session = Depends(get_db), admin
         flash(request, "Bitte zuerst die Verbindung zur OPNsense einrichten.", "error")
         return redirect("/settings")
     auth_servers, error = await _auth_servers(db)
-    defaults = services.suggest_tunnel_defaults(db)
-    f = {"public_host": get_setting(db, "public_host", ""), "mode": "split", "proto": "udp",
-         "session_hours": 12, "fw_rules": "1", **defaults}
+    f = services.suggest_tunnel_defaults(db)
     return render(request, "tunnel_form.html", f=f, auth_servers=auth_servers, error=error, new=True)
 
 

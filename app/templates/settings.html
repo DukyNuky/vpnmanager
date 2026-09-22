@@ -81,4 +81,77 @@
 </div>
 </div>
 </div>
+<form method="post" action="/settings/tunnel-defaults" class="card" id="vorgaben">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>Vorgaben für neue Tunnel</h2>
+  <p class="small muted">Diese Werte werden beim Anlegen eines Tunnels vorausgefüllt und dort unter „Erweiterte Einstellungen“
+     eingeklappt. So muss ein Admin nur noch Name und Split/Full wählen. Port und Tunnel-Netz werden automatisch
+     hochgezählt, wenn sie schon belegt sind.</p>
+
+  <div class="row">
+    <div>
+      <label for="tpl_port">Start-Port</label>
+      <input type="number" id="tpl_port" name="port" value="{{ tpl.port }}" min="1" max="65535">
+    </div>
+    <div>
+      <label for="tpl_proto">Protokoll</label>
+      <select id="tpl_proto" name="proto">
+        <option value="udp" {{ 'selected' if tpl.proto == 'udp' }}>UDP (empfohlen)</option>
+        <option value="tcp" {{ 'selected' if tpl.proto == 'tcp' }}>TCP</option>
+      </select>
+    </div>
+    <div>
+      <label for="tpl_network">Tunnel-Netz (erstes)</label>
+      <input type="text" id="tpl_network" name="network" value="{{ tpl.network }}">
+      <div class="hint">Weitere Tunnel erhalten das nächste freie Netz gleicher Größe.</div>
+    </div>
+  </div>
+
+  <label>Standard-Modus</label>
+  <div class="segmented">
+    <label><input type="radio" name="mode" value="split" {{ 'checked' if tpl.mode != 'full' }}>
+      <strong>Split-Tunnel</strong><span class="small muted">Nur Firmennetze über VPN</span></label>
+    <label><input type="radio" name="mode" value="full" {{ 'checked' if tpl.mode == 'full' }}>
+      <strong>Full-Tunnel</strong><span class="small muted">Gesamter Verkehr über VPN</span></label>
+  </div>
+
+  <label for="tpl_routes">Freigegebene Firmennetze</label>
+  <textarea id="tpl_routes" name="routes" placeholder="192.168.1.0/24">{{ tpl.routes }}</textarea>
+  <div class="hint">Ein Netz pro Zeile – typischerweise das LAN des Kunden.</div>
+
+  <div class="row">
+    <div>
+      <label for="tpl_dns">DNS-Server</label>
+      <input type="text" id="tpl_dns" name="dns_servers" value="{{ tpl.dns_servers | replace('\n', ', ') }}" placeholder="192.168.1.1">
+    </div>
+    <div>
+      <label for="tpl_domain">DNS-Domain</label>
+      <input type="text" id="tpl_domain" name="dns_domain" value="{{ tpl.dns_domain }}" placeholder="firma.local">
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="tpl_auth">Authentifizierungsserver (mit 2FA)</label>
+      {% if auth_servers %}
+      <select id="tpl_auth" name="auth_server">
+        <option value="">– beim Anlegen wählen –</option>
+        {% for a in auth_servers %}<option value="{{ a }}" {{ 'selected' if tpl.auth_server == a }}>{{ a }}</option>{% endfor %}
+      </select>
+      {% else %}
+      <input type="text" id="tpl_auth" name="auth_server" value="{{ tpl.auth_server }}" placeholder="VPN-TOTP">
+      <div class="hint">Liste nicht verfügbar – OPNsense-Verbindung einrichten oder Namen eintragen.</div>
+      {% endif %}
+    </div>
+    <div>
+      <label for="tpl_hours">Sitzungsdauer (Stunden)</label>
+      <input type="number" id="tpl_hours" name="session_hours" value="{{ tpl.session_hours }}" min="1" max="168">
+    </div>
+  </div>
+
+  <label class="inline" style="margin-top:18px"><input type="checkbox" name="fw_rules" value="1" {{ 'checked' if tpl.fw_rules == '1' }}>
+    Firewall-Regeln standardmäßig automatisch anlegen</label>
+
+  <div class="actions"><button type="submit">Vorgaben speichern</button></div>
+</form>
 {% endblock %}

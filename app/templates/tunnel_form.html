@@ -9,20 +9,34 @@
 </div>
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
-<form method="post" class="card">
+<form method="post" class="card" id="tunnel-form">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
 
   <h2>Allgemein</h2>
-  <div class="row">
-    <div>
-      <label for="name">Name</label>
-      <input type="text" id="name" name="name" value="{{ f.name or '' }}" maxlength="48" required placeholder="z. B. Mitarbeiter">
-    </div>
-    <div>
-      <label for="public_host">Öffentliche Adresse</label>
-      <input type="text" id="public_host" name="public_host" value="{{ f.public_host or '' }}" required placeholder="vpn.firma.de">
-    </div>
+  <label for="name">Name</label>
+  <input type="text" id="name" name="name" value="{{ f.name or '' }}" maxlength="48" required placeholder="z. B. Mitarbeiter, Buchhaltung, Externe">
+  {% if new %}<div class="hint">Frei wählbar – erscheint in der Übersicht, im Profilnamen und in der Anleitung.</div>{% endif %}
+
+  <h2 style="margin-top:24px">Was dürfen die Mitarbeiter erreichen?</h2>
+  <div class="segmented">
+    <label><input type="radio" name="mode" value="split" {{ 'checked' if f.mode != 'full' }}>
+      <strong>Split-Tunnel</strong><span class="small muted">Nur die Firmennetze laufen über das VPN, Internet weiter direkt. (empfohlen)</span></label>
+    <label><input type="radio" name="mode" value="full" {{ 'checked' if f.mode == 'full' }}>
+      <strong>Full-Tunnel</strong><span class="small muted">Der gesamte Datenverkehr läuft über die Firma, auch Internet.</span></label>
   </div>
+
+  {% if new %}
+  {% set open_adv = error or not f.public_host or not f.routes or not auth_servers %}
+  <details style="margin-top:24px" {{ 'open' if open_adv }}>
+    <summary>Erweiterte Einstellungen <span class="muted small" style="font-weight:400">
+      – vorausgefüllt: {{ f.public_host or '?' }}:{{ f.port }}/{{ f.proto | upper }}, Netz {{ f.network }}{% if f.routes %}, Freigabe {{ f.routes.split() | join(', ') }}{% endif %}</span></summary>
+    <p class="small muted" style="margin:10px 0 0">Die Werte stammen aus den <a href="/settings#vorgaben">Vorgaben für neue Tunnel</a>. Im Normalfall muss hier nichts geändert werden.</p>
+  {% endif %}
+
+  <h2 style="margin-top:24px">Verbindung</h2>
+  <label for="public_host">Öffentliche Adresse</label>
+  <input type="text" id="public_host" name="public_host" value="{{ f.public_host or '' }}" required placeholder="vpn.firma.de">
+  <div class="hint">DNS-Name oder feste IP, unter der die OPNsense aus dem Internet erreichbar ist.</div>
   <div class="row">
     <div>
       <label for="port">Port</label>
@@ -50,17 +64,10 @@
     </div>
   </div>
 
-  <h2 style="margin-top:28px">Was dürfen die Mitarbeiter erreichen?</h2>
-  <div class="segmented">
-    <label><input type="radio" name="mode" value="split" {{ 'checked' if f.mode != 'full' }}>
-      <strong>Split-Tunnel</strong><span class="small muted">Nur die unten eingetragenen Firmennetze laufen über das VPN, Internet weiter direkt. (empfohlen)</span></label>
-    <label><input type="radio" name="mode" value="full" {{ 'checked' if f.mode == 'full' }}>
-      <strong>Full-Tunnel</strong><span class="small muted">Der gesamte Datenverkehr läuft über die Firma, auch Internet.</span></label>
-  </div>
+  <h2 style="margin-top:24px">Netze und DNS</h2>
   <label for="routes">Freigegebene Firmennetze</label>
   <textarea id="routes" name="routes" placeholder="192.168.1.0/24">{{ f.routes or '' }}</textarea>
   <div class="hint">Ein Netz pro Zeile, z. B. <span class="mono">192.168.1.0/24</span>. Beim Split-Tunnel Pflicht; bei aktiven Firewall-Regeln wird der Zugriff auf diese Netze erlaubt.</div>
-
   <div class="row">
     <div>
       <label for="dns_servers">DNS-Server für VPN-Clients</label>
@@ -73,7 +80,7 @@
     </div>
   </div>
 
-  <h2 style="margin-top:28px">Anmeldung</h2>
+  <h2 style="margin-top:24px">Anmeldung</h2>
   <div class="row">
     <div>
       <label for="auth_server">Authentifizierungsserver (mit 2FA)</label>
@@ -96,9 +103,10 @@
   </div>
 
   {% if new %}
-  <label class="inline" style="margin-top:22px"><input type="checkbox" name="fw_rules" value="1" {{ 'checked' if f.fw_rules }}>
+  <label class="inline" style="margin-top:22px"><input type="checkbox" name="fw_rules" value="1" {{ 'checked' if f.fw_rules in ('1', 1, True) }}>
     Firewall-Regeln automatisch anlegen (Einwahl auf WAN + Zugriff der VPN-Clients)</label>
   <div class="hint">Für Full-Tunnel muss das ausgehende NAT auf „Automatisch“ oder „Hybrid“ stehen (Standard).</div>
+  </details>
   {% endif %}
 
   <div class="actions">
@@ -117,4 +125,13 @@
   <div class="actions"><button type="submit" class="danger">Endgültig löschen</button></div>
 </form>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Pflichtfeld in eingeklappten "Erweiterten Einstellungen" leer → Bereich aufklappen, damit der Browser es zeigen kann
+document.getElementById('tunnel-form').addEventListener('invalid', function (e) {
+  const d = e.target.closest('details');
+  if (d) d.open = true;
+}, true);
+</script>
 {% endblock %}

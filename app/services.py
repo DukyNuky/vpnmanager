@@ -28,14 +28,14 @@ class ValidationError(ValueError):
 
 # ------------------------------------------------------------------ Hilfen
 
-def client(db: Session) -> OPNsense:
+def client(db: Session, timeout: float = 30) -> OPNsense:
     url = get_setting(db, "opn_url")
     key = decrypt(get_setting(db, "opn_key_enc"))
     secret = decrypt(get_setting(db, "opn_secret_enc"))
     if not (url and key and secret):
         raise OPNsenseError("Die Verbindung zur OPNsense ist noch nicht eingerichtet (siehe Einstellungen).")
     verify = get_setting(db, "opn_verify_tls", "1") == "1"
-    return OPNsense(url, key, secret, verify_tls=verify)
+    return OPNsense(url, key, secret, verify_tls=verify, timeout=timeout)
 
 
 def opn_configured(db: Session) -> bool:
@@ -90,13 +90,82 @@ def _ips(text: str, field: str) -> list[str]:
     return result
 
 
+# Vorgaben für neue Tunnel (Einstellungen → "Vorgaben für neue Tunnel"), gespeichert als tpl_<feld>
+TEMPLATE_BUILTIN = {
+    "port": "1194", "proto": "udp", "network": "10.8.0.0/24", "mode": "split", "routes": "",
+    "dns_servers": "", "dns_domain": "", "session_hours": "12", "auth_server": "", "fw_rules": "1",
+}
+
+
+def tunnel_template(db: Session) -> dict:
+    return {k: get_setting(db, f"tpl_{k}", v) for k, v in TEMPLATE_BUILTIN.items()}
+
+
+def validate_template(form: dict) -> dict:
+    """Prüft die Vorgaben. Leere Felder sind erlaubt (dann gibt der Admin sie beim Anlegen ein)."""
+    try:
+        port = int(form.get("port") or 1194)
+    except ValueError:
+        port = 0
+    if not 1 <= port <= 65535:
+        raise ValidationError("Start-Port muss zwischen 1 und 65535 liegen.")
+    proto = form.get("proto", "udp")
+    if proto not in ("udp", "tcp"):
+        raise ValidationError("Ungültiges Protokoll.")
+    net = _networks(form.get("network", ""), "Tunnel-Netz")
+    if len(net) != 1:
+        raise ValidationError("Bitte genau ein Tunnel-Netz als Vorlage angeben (z. B. 10.8.0.0/24).")
+    network = ipaddress.ip_network(net[0])
+    if network.version != 4 or network.prefixlen > 28:
+        raise ValidationError("Tunnel-Netz muss ein IPv4-Netz mit /28 oder größer sein.")
+    mode = form.get("mode", "split")
+    if mode not in ("split", "full"):
+        raise ValidationError("Ungültiger Tunnel-Modus.")
+    routes = _networks(form.get("routes", ""), "Freigegebene Netze")
+    dns = _ips(form.get("dns_servers", ""), "DNS-Server")
+    dns_domain = (form.get("dns_domain") or "").strip()
+    if dns_domain and not re.fullmatch(r"[A-Za-z0-9.\-]+", dns_domain):
+        raise ValidationError("DNS-Domain ist ungültig.")
+    try:
+        session_hours = int(form.get("session_hours") or 12)
+    except ValueError:
+        session_hours = 0
+    if not 1 <= session_hours <= 168:
+        raise ValidationError("Sitzungsdauer muss zwischen 1 und 168 Stunden liegen.")
+    return {
+        "port": str(port), "proto": proto, "network": str(network), "mode": mode,
+        "routes": "\n".join(routes), "dns_servers": "\n".join(dns), "dns_domain": dns_domain,
+        "session_hours": str(session_hours), "auth_server": (form.get("auth_server") or "").strip(),
+        "fw_rules": "1" if form.get("fw_rules") else "0",
+    }
+
+
+def _next_free_network(base: str, taken: list) -> str:
+    candidate = ipaddress.ip_network(base)
+    for _ in range(256):
+        if not any(candidate.overlaps(t) for t in taken):
+            return str(candidate)
+        nxt = int(candidate.network_address) + candidate.num_addresses
+        if nxt >= 2 ** 32:
+            break
+        candidate = ipaddress.ip_network(f"{ipaddress.IPv4Address(nxt)}/{candidate.prefixlen}")
+    return base
+
+
 def suggest_tunnel_defaults(db: Session) -> dict:
+    """Formularwerte für einen neuen Tunnel: Vorgaben + nächster freier Port und freies Tunnel-Netz."""
+    tpl = tunnel_template(db)
     tunnels = db.scalars(select(Tunnel)).all()
-    used_nets = {t.network for t in tunnels}
-    used_ports = {t.port for t in tunnels}
-    net = next(f"10.8.{i}.0/24" for i in range(0, 255) if f"10.8.{i}.0/24" not in used_nets)
-    port = next(p for p in range(1194, 1294) if p not in used_ports)
-    return {"network": net, "port": port}
+    used_ports = {t.port for t in tunnels if t.proto == tpl["proto"]}
+    port = next((p for p in range(int(tpl["port"]), 65536) if p not in used_ports), int(tpl["port"]))
+    taken = [ipaddress.ip_network(t.network) for t in tunnels]
+    taken += [ipaddress.ip_network(r) for r in tpl["routes"].split()]
+    return {
+        **tpl,
+        "public_host": get_setting(db, "public_host", ""),
+        "port": port,
+        "network": _next_free_network(tpl["network"], taken),
+    }
 
 
 def validate_tunnel(db: Session, form: dict, existing: Tunnel | None = None) -> dict:
