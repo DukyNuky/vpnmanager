@@ -2,6 +2,7 @@ services:
   vpnmanager:
     build: .
     image: vpnmanager:latest
+    pull_policy: build
     container_name: vpnmanager
     restart: unless-stopped
     ports:
