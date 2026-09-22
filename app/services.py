@@ -304,6 +304,10 @@ async def create_tunnel(db: Session, actor: str, data: dict, fw_rules: bool) -> 
             )
             t.opn_statickey_uuid = await c.add_static_key(f"{DESCR_PREFIX}: {t.name}", tls_key)
             t.opn_instance_uuid = await c.add_instance({**instance_payload(t), "vpnid": ""})
+            if not await c.get_instance(t.opn_instance_uuid):
+                raise OPNsenseError(
+                    "Die OPNsense hat das Anlegen der OpenVPN-Instanz bestätigt, sie ist dort aber nicht vorhanden."
+                )
             if fw_rules:
                 uuids = [await c.add_rule(r) for r in _fw_rules(t)]
                 t.opn_fw_rules = json.dumps(uuids)
@@ -378,6 +382,43 @@ async def delete_tunnel(db: Session, actor: str, t: Tunnel) -> list[str]:
     db.delete(t)
     db.commit()
     return errors
+
+
+async def check_tunnel(db: Session, t: Tunnel) -> list[tuple[str, bool, str]]:
+    """Abgleich: existieren alle Objekte des Tunnels auf der OPNsense und läuft der Dienst?"""
+    results: list[tuple[str, bool, str]] = []
+    async with client(db) as c:
+        async def probe(label: str, fn, uuid: str | None, describe=lambda o: ""):
+            if not uuid:
+                results.append((label, False, "keine Referenz im Tool gespeichert"))
+                return None
+            try:
+                obj = await fn(uuid)
+            except OPNsenseError as exc:
+                results.append((label, False, str(exc)))
+                return None
+            results.append((label, bool(obj), describe(obj) if obj else f"nicht vorhanden (uuid {uuid})"))
+            return obj
+
+        await probe("Zertifizierungsstelle (CA)", c.get_ca, t.opn_ca_uuid, lambda o: o.get("descr", ""))
+        await probe("Server-Zertifikat", c.get_cert, t.opn_cert_uuid, lambda o: o.get("descr", ""))
+        await probe("tls-crypt-Key", c.get_static_key, t.opn_statickey_uuid, lambda o: o.get("description", ""))
+        inst = await probe("OpenVPN-Instanz", c.get_instance, t.opn_instance_uuid,
+                           lambda o: f"{o.get('description', '')}, Port {o.get('port', '?')}")
+        if inst is not None:
+            enabled = str(inst.get("enabled", "")) == "1"
+            results.append(("Instanz aktiviert", enabled, "ja" if enabled else "in der OPNsense deaktiviert"))
+        for i, uuid in enumerate(t.fw_rule_list, 1):
+            await probe(f"Firewall-Regel {i}", c.get_rule, uuid, lambda o: o.get("description", ""))
+        try:
+            rows = await c.sessions()
+            running = any(str(r.get("id", "")).split("_", 1)[0] == t.opn_instance_uuid
+                          and (r.get("status") == "ok" or r.get("is_client")) for r in rows)
+            results.append(("OpenVPN-Dienst", running, "läuft" if running else
+                            "läuft nicht – Protokoll unter VPN → OpenVPN → Log File prüfen"))
+        except OPNsenseError as exc:
+            results.append(("OpenVPN-Dienst", False, str(exc)))
+    return results
 
 
 async def restart_tunnel(db: Session, actor: str, t: Tunnel) -> None:

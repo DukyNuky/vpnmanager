@@ -598,6 +598,19 @@ async def tunnel_edit_submit(tunnel_id: int, request: Request, db: Session = Dep
     return redirect(f"/tunnels/{t.id}")
 
 
+@app.post("/tunnels/{tunnel_id}/check", response_class=HTMLResponse)
+async def tunnel_check(tunnel_id: int, request: Request, db: Session = Depends(get_db),
+                       admin: Admin = Depends(require_admin)):
+    await form_data(request)
+    t = _get_tunnel(db, tunnel_id)
+    try:
+        checks, error = await services.check_tunnel(db, t), None
+    except OPNsenseError as exc:
+        checks, error = [], str(exc)
+    return render(request, "partials/test_result.html", checks=checks, error=error, all_ok=False,
+                  only_fw_missing=False, auth_servers=[], totp_servers=[])
+
+
 @app.post("/tunnels/{tunnel_id}/restart")
 async def tunnel_restart(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                          admin: Admin = Depends(require_admin)):

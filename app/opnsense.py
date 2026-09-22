@@ -1,7 +1,10 @@
 """Schlanker Client für die OPNsense-REST-API (geprüft gegen OPNsense 26.x)."""
+import logging
 from typing import Any
 
 import httpx
+
+log = logging.getLogger("vpnmanager.opnsense")
 
 
 class OPNsenseError(Exception):
@@ -40,8 +43,11 @@ class OPNsense:
         except httpx.HTTPError as exc:
             raise OPNsenseError(f"Verbindungsfehler: {exc}") from exc
 
+        log.info("%s %s → HTTP %s", method, path, resp.status_code)
         if resp.status_code in (401, 403):
-            raise OPNsenseError("Zugriff verweigert – API-Key/Secret oder Rechte des API-Benutzers prüfen")
+            raise OPNsenseError(
+                f"Zugriff verweigert auf {path} – API-Key/Secret oder Rechte des API-Benutzers prüfen"
+            )
         if resp.status_code == 404:
             raise OPNsenseError(f"API-Endpunkt nicht gefunden: {path}")
         if resp.status_code >= 400:
@@ -54,8 +60,13 @@ class OPNsense:
             data = resp.json()
         except ValueError as exc:
             raise OPNsenseError("Ungültige Antwort der OPNsense (kein JSON)") from exc
-        if isinstance(data, dict) and data.get("result") == "failed":
-            raise OPNsenseError("OPNsense hat die Eingaben abgelehnt", data.get("validations"))
+        if isinstance(data, dict) and data.get("result") in ("failed", "not found"):
+            log.warning("%s %s abgelehnt: %s", method, path, data)
+            if data.get("result") == "not found":
+                raise OPNsenseError(f"Objekt nicht gefunden: {path}")
+            raise OPNsenseError(f"OPNsense hat die Eingaben abgelehnt ({path})", data.get("validations"))
+        if isinstance(data, dict) and data.get("uuid"):
+            log.info("%s %s → uuid %s", method, path, data["uuid"])
         return data
 
     async def get(self, path: str) -> Any:
@@ -143,8 +154,28 @@ class OPNsense:
     async def set_instance(self, uuid: str, obj: dict) -> None:
         await self.post(f"openvpn/instances/set/{uuid}", {"instance": obj})
 
+    async def _get_obj(self, path: str, root: str) -> dict:
+        """Liefert ein Objekt per get/<uuid>; {} wenn es nicht existiert (OPNsense antwortet dann mit [])."""
+        data = await self.get(path)
+        return data.get(root) or {} if isinstance(data, dict) else {}
+
     async def get_instance(self, uuid: str) -> dict:
-        return (await self.get(f"openvpn/instances/get/{uuid}")).get("instance", {})
+        return await self._get_obj(f"openvpn/instances/get/{uuid}", "instance")
+
+    async def get_ca(self, uuid: str) -> dict:
+        return await self._get_obj(f"trust/ca/get/{uuid}", "ca")
+
+    async def get_cert(self, uuid: str) -> dict:
+        return await self._get_obj(f"trust/cert/get/{uuid}", "cert")
+
+    async def get_static_key(self, uuid: str) -> dict:
+        return await self._get_obj(f"openvpn/instances/get_static_key/{uuid}", "statickey")
+
+    async def get_rule(self, uuid: str) -> dict:
+        return await self._get_obj(f"firewall/filter/get_rule/{uuid}", "rule")
+
+    async def get_user(self, uuid: str) -> dict:
+        return await self._get_obj(f"auth/user/get/{uuid}", "user")
 
     async def delete_instance(self, uuid: str | None) -> None:
         await self._delete("openvpn/instances/del", uuid)

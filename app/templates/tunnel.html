@@ -23,6 +23,11 @@
     <dt>Anmeldung</dt><dd>Zertifikat + Passwort + 2FA ({{ t.auth_server }})</dd>
     <dt>Firewall-Regeln</dt><dd>{{ 'automatisch verwaltet' if t.fw_rule_list else 'manuell' }}</dd>
   </dl>
+  <div class="actions">
+    <button class="secondary small" hx-post="/tunnels/{{ t.id }}/check" hx-target="#check-result">
+      Mit OPNsense abgleichen <span class="htmx-indicator">…</span></button>
+  </div>
+  <div id="check-result" style="margin-top:12px"></div>
 </div>
 
 <div id="status" hx-get="/tunnels/{{ t.id }}/status" hx-trigger="load, every 15s" hx-swap="innerHTML">
