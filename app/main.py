@@ -671,9 +671,19 @@ async def tunnel_kill(tunnel_id: int, request: Request, db: Session = Depends(ge
                       admin: Admin = Depends(require_admin)):
     form = await form_data(request)
     t = _get_tunnel(db, tunnel_id)
+    name = form.get("common_name", "").strip()
+    user = next((u for u in t.users if u.username == name), None)
     try:
-        await services.kill_session(db, admin.username, t, form.get("session_id", ""))
+        if form.get("lock") and user:
+            await services.set_user_disabled(db, admin.username, user, True)
+            flash(request, f"„{name}“ wurde gesperrt und getrennt. Entsperren über die Benutzerseite.")
+        else:
+            await services.kill_session(db, admin.username, t, name)
+            flash(request, f"Verbindung von „{name}“ getrennt. Hinweis: Die App verbindet sich innerhalb der "
+                           f"Sitzungsdauer automatisch neu – um den Zugang zu verhindern, „Sperren & trennen“ "
+                           f"verwenden.", "warn")
     except OPNsenseError as exc:
+        db.rollback()
         flash(request, str(exc), "error")
     return await tunnel_status(tunnel_id, request, db, admin)
 

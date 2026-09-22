@@ -65,6 +65,9 @@ class OPNsense:
             if data.get("result") == "not found":
                 raise OPNsenseError(f"Objekt nicht gefunden: {path}")
             raise OPNsenseError(f"OPNsense hat die Eingaben abgelehnt ({path})", data.get("validations"))
+        if isinstance(data, dict) and data.get("status") == "failed":  # Trust/CRL-API antwortet mit "status"
+            log.warning("%s %s abgelehnt: %s", method, path, data)
+            raise OPNsenseError(f"OPNsense hat die Eingaben abgelehnt ({path})", data.get("validations"))
         if isinstance(data, dict) and data.get("uuid"):
             log.info("%s %s → uuid %s", method, path, data["uuid"])
         return data
@@ -132,6 +135,25 @@ class OPNsense:
             "action": "import", "descr": descr, "crt_payload": crt_pem, "prv_payload": key_pem, "refid": refid,
         })
 
+    async def set_crl(self, ca_refid: str, descr: str, crl_pem: str) -> None:
+        """Importiert/ersetzt die (im Tool signierte) Sperrliste einer CA."""
+        await self.post(f"trust/crl/set/{ca_refid}", {"crl": {
+            "crlmethod": "existing", "descr": descr, "text": crl_pem, "lifetime": "3650",
+        }})
+
+    async def delete_crl(self, ca_refid: str | None) -> None:
+        if ca_refid:
+            await self.post(f"trust/crl/del/{ca_refid}")
+
+    async def find_crl_refid(self, descr: str) -> str | None:
+        """Refid einer CRL anhand der Beschreibung (aus den Auswahloptionen des Instanz-Feldes 'crl')."""
+        options = (await self.get("openvpn/instances/get")).get("instance", {}).get("crl") or {}
+        for refid, opt in options.items():
+            label = opt.get("value", "") if isinstance(opt, dict) else str(opt)
+            if refid and label.strip() == descr:
+                return refid
+        return None
+
     async def delete_ca(self, uuid: str | None) -> None:
         await self._delete("trust/ca/del", uuid)
 
@@ -193,8 +215,17 @@ class OPNsense:
         data = await self.post("openvpn/service/search_sessions", {"current": 1, "rowCount": 9999, "type": ["server"]})
         return data.get("rows", [])
 
-    async def kill_session(self, instance_uuid: str, session_id: str) -> None:
-        await self.post("openvpn/service/kill_session", {"server_id": instance_uuid, "session_id": session_id})
+    async def kill_session(self, instance_uuid: str, session_id: str) -> int:
+        """Beendet Sitzungen (session_id = Common Name oder IP:Port). Rückgabe: Anzahl getrennter Clients."""
+        data = await self.post("openvpn/service/kill_session", {"server_id": instance_uuid, "session_id": session_id})
+        status = data.get("status") if isinstance(data, dict) else None
+        if status == "killed":
+            return int(data.get("clients") or 1)
+        if status == "not_found":
+            raise OPNsenseError(f"Keine aktive Verbindung für „{session_id}“ gefunden (evtl. bereits getrennt).")
+        if status == "server_not_found":
+            raise OPNsenseError("Die OpenVPN-Instanz läuft auf der OPNsense nicht (kein Management-Socket).")
+        raise OPNsenseError(f"Trennen fehlgeschlagen: {data}")
 
     # ---------------------------------------------------------------- Benutzer
 

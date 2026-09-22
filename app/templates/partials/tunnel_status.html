@@ -28,9 +28,13 @@
       <td class="mono small">{{ s.virtual_address }}</td>
       <td class="small">{{ s.connected_since }}</td>
       <td class="small">{{ s.bytes_received | bytes }} / {{ s.bytes_sent | bytes }}</td>
-      <td style="text-align:right">
-        <button class="small danger" hx-post="/tunnels/{{ t.id }}/kill" hx-vals='{"session_id": "{{ s.real_address }}"}'
-                hx-target="#status" hx-confirm="Verbindung von {{ s.username }} trennen?">Trennen</button>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="small secondary" hx-post="/tunnels/{{ t.id }}/kill" hx-vals='{"common_name": "{{ s.common_name }}"}'
+                hx-target="#status" hx-confirm="Verbindung von {{ s.username }} trennen? Die App verbindet sich ggf. automatisch neu.">Trennen</button>
+        {% if s.common_name in t.users | map(attribute='username') | list %}
+        <button class="small danger" hx-post="/tunnels/{{ t.id }}/kill" hx-vals='{"common_name": "{{ s.common_name }}", "lock": "1"}'
+                hx-target="#status" hx-confirm="{{ s.username }} sperren und trennen? Eine erneute Anmeldung ist dann nicht mehr möglich.">Sperren &amp; trennen</button>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

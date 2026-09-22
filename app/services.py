@@ -263,6 +263,7 @@ def instance_payload(t: Tunnel) -> dict:
         "dns_domain": t.dns_domain,
         "register_dns": "1" if t.dns_list else "0",
         "various_push_flags": "block-outside-dns" if full and t.dns_list else "",
+        "crl": t.opn_crl_refid or "",
     }
 
 
@@ -304,6 +305,7 @@ async def create_tunnel(db: Session, actor: str, data: dict, fw_rules: bool) -> 
                 f"{DESCR_PREFIX}: {t.name} Server", srv_cert, srv_key, t.opn_cert_refid
             )
             t.opn_statickey_uuid = await c.add_static_key(f"{DESCR_PREFIX}: {t.name}", tls_key)
+            await _push_crl(c, t)
             t.opn_instance_uuid = await c.add_instance({**instance_payload(t), "vpnid": ""})
             if not await c.get_instance(t.opn_instance_uuid):
                 raise OPNsenseError(
@@ -363,6 +365,7 @@ async def _cleanup_tunnel(c: OPNsense, t: Tunnel) -> list[str]:
         (c.delete_instance, t.opn_instance_uuid),
         (c.delete_static_key, t.opn_statickey_uuid),
         (c.delete_cert, t.opn_cert_uuid),
+        (c.delete_crl, t.opn_ca_refid if t.opn_crl_refid else None),
         (c.delete_ca, t.opn_ca_uuid),
     ]
     for fn, uuid in steps:
@@ -458,6 +461,8 @@ async def check_tunnel(db: Session, t: Tunnel) -> list[tuple[str, bool, str]]:
         if inst is not None:
             enabled = str(inst.get("enabled", "")) == "1"
             results.append(("Instanz aktiviert", enabled, "ja" if enabled else "in der OPNsense deaktiviert"))
+        results.append(("Sperrliste (CRL)", bool(t.opn_crl_refid),
+                        "zugeordnet" if t.opn_crl_refid else "noch keine – wird beim ersten Sperren angelegt"))
         for i, uuid in enumerate(t.fw_rule_list, 1):
             await probe(f"Firewall-Regel {i}", c.get_rule, uuid, lambda o: o.get("description", ""))
         try:
@@ -517,11 +522,12 @@ async def fetch_status(db: Session) -> dict[str, dict]:
     return status
 
 
-async def kill_session(db: Session, actor: str, t: Tunnel, session_id: str) -> None:
+async def kill_session(db: Session, actor: str, t: Tunnel, common_name: str) -> int:
     async with client(db) as c:
-        await c.kill_session(t.opn_instance_uuid, session_id)
-    audit(db, actor, "session.kill", f"{t.name}: {session_id}")
+        count = await c.kill_session(t.opn_instance_uuid, common_name)
+    audit(db, actor, "session.kill", f"{t.name}: {common_name}")
     db.commit()
+    return count
 
 
 async def _kill_user_sessions(c: OPNsense, t: Tunnel, username: str) -> None:
@@ -529,6 +535,32 @@ async def _kill_user_sessions(c: OPNsense, t: Tunnel, username: str) -> None:
         await c.kill_session(t.opn_instance_uuid, username)
     except OPNsenseError as exc:
         log.info("Keine Session für %s beendet: %s", username, exc)
+
+
+# ------------------------------------------------------------------ Sperrliste (CRL)
+
+def _revoke_permanently(t: Tunnel, cert_pem: str) -> None:
+    serials = t.revoked_list
+    serial = pki.cert_serial_hex(cert_pem)
+    if serial not in serials:
+        t.revoked_serials = json.dumps(serials + [serial])
+
+
+async def _push_crl(c: OPNsense, t: Tunnel) -> None:
+    """Erzeugt die Sperrliste neu (dauerhaft gesperrte + Zertifikate gesperrter Benutzer) und lädt sie hoch.
+    OpenVPN prüft sie bei jedem Verbindungsaufbau – auch bei Wiederverbindungen per Sitzungs-Token."""
+    serials = t.revoked_list + [pki.cert_serial_hex(u.cert_pem) for u in t.users if u.disabled]
+    descr = f"{DESCR_PREFIX}: {t.name} CRL"
+    await c.set_crl(t.opn_ca_refid, descr, pki.build_crl(t.ca_cert, decrypt(t.ca_key_enc), serials))
+    if not t.opn_crl_refid:
+        # erstmalig: CRL-Referenz ermitteln und der Instanz zuordnen (ältere Tunnel ohne CRL)
+        refid = await c.find_crl_refid(descr)
+        if not refid:
+            raise OPNsenseError("Sperrliste wurde gespeichert, ist aber in der OPNsense nicht auffindbar.")
+        t.opn_crl_refid = refid
+        if t.opn_instance_uuid:
+            await c.set_instance(t.opn_instance_uuid, {"crl": refid})
+            await c.reconfigure_openvpn()
 
 
 # ------------------------------------------------------------------ Benutzer
@@ -600,26 +632,35 @@ async def reset_otp(db: Session, actor: str, u: VpnUser) -> None:
 async def reissue_profile(db: Session, actor: str, u: VpnUser) -> None:
     """Neues Client-Zertifikat (z. B. nach Ablauf). Das alte Profil ist ohne Passwort+Code wertlos."""
     t = u.tunnel
+    _revoke_permanently(t, u.cert_pem)
     cert, key, not_after = pki.issue_cert(t.ca_cert, decrypt(t.ca_key_enc), u.username, server=False)
     u.cert_pem, u.key_enc, u.cert_not_after = cert, encrypt(key), not_after
+    async with client(db) as c:
+        await _push_crl(c, t)
+        await _kill_user_sessions(c, t, u.username)
     audit(db, actor, "user.reissue", u.username)
     db.commit()
 
 
 async def set_user_disabled(db: Session, actor: str, u: VpnUser, disabled: bool) -> None:
+    u.disabled = disabled
     async with client(db) as c:
         await c.set_user(u.opn_user_uuid, u.username, disabled="1" if disabled else "0")
+        await _push_crl(c, u.tunnel)
         if disabled:
             await _kill_user_sessions(c, u.tunnel, u.username)
-    u.disabled = disabled
     audit(db, actor, "user.disable" if disabled else "user.enable", u.username)
     db.commit()
 
 
 async def delete_user(db: Session, actor: str, u: VpnUser) -> None:
+    t = u.tunnel
+    _revoke_permanently(t, u.cert_pem)
     async with client(db) as c:
         await c.delete_user(u.opn_user_uuid)
-        await _kill_user_sessions(c, u.tunnel, u.username)
-    audit(db, actor, "user.delete", f"{u.username} ({u.tunnel.name})")
+        t.users.remove(u)
+        await _push_crl(c, t)
+        await _kill_user_sessions(c, t, u.username)
+    audit(db, actor, "user.delete", f"{u.username} ({t.name})")
     db.delete(u)
     db.commit()

@@ -68,6 +68,9 @@ class Tunnel(Base):
     opn_cert_refid: Mapped[str | None] = mapped_column(String(32))
     opn_statickey_uuid: Mapped[str | None] = mapped_column(String(64))
     opn_fw_rules: Mapped[str] = mapped_column(Text, default="[]")  # JSON-Liste von Regel-UUIDs
+    opn_crl_refid: Mapped[str | None] = mapped_column(String(32))
+    # dauerhaft gesperrte Zertifikate (gelöschte Benutzer, ersetzte Profile) als Hex-Seriennummern
+    revoked_serials: Mapped[str] = mapped_column(Text, default="[]")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -86,6 +89,10 @@ class Tunnel(Base):
     @property
     def fw_rule_list(self) -> list[str]:
         return json.loads(self.opn_fw_rules or "[]")
+
+    @property
+    def revoked_list(self) -> list[str]:
+        return json.loads(self.revoked_serials or "[]")
 
 
 class VpnUser(Base):
@@ -146,8 +153,24 @@ def _sqlite_pragmas(dbapi_conn, _):
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
+# Spalten, die nach der ersten Version hinzugekommen sind (SQLite: create_all ergänzt keine Spalten)
+_ADDED_COLUMNS = {
+    "tunnels": [("opn_crl_refid", "VARCHAR(32)"), ("revoked_serials", "TEXT DEFAULT '[]'")],
+}
+
+
+def _migrate() -> None:
+    with engine.begin() as conn:
+        for table, columns in _ADDED_COLUMNS.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for name, ddl in columns:
+                if name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate()
     settings.db_path.chmod(0o600)
 
 

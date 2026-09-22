@@ -112,6 +112,30 @@ def issue_cert(
     return _cert_pem(cert), _key_pem(key), not_after.replace(tzinfo=None)
 
 
+def cert_serial_hex(cert_pem: str) -> str:
+    return format(x509.load_pem_x509_certificate(cert_pem.encode()).serial_number, "x")
+
+
+def build_crl(ca_cert_pem: str, ca_key_pem: str, serials_hex: list[str]) -> str:
+    """Signierte Sperrliste. Lange Gültigkeit, weil sie bei jeder Änderung neu erzeugt wird
+    (eine abgelaufene CRL würde OpenVPN alle Verbindungen ablehnen lassen)."""
+    ca_cert = x509.load_pem_x509_certificate(ca_cert_pem.encode())
+    ca_key = serialization.load_pem_private_key(ca_key_pem.encode(), password=None)
+    now = _now()
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(ca_cert.subject)
+        .last_update(now - datetime.timedelta(minutes=5))
+        .next_update(now + datetime.timedelta(days=CA_DAYS))
+        .add_extension(x509.CRLNumber(int(now.timestamp())), critical=False)
+    )
+    for serial in sorted(set(serials_hex)):
+        builder = builder.add_revoked_certificate(
+            x509.RevokedCertificateBuilder().serial_number(int(serial, 16)).revocation_date(now).build()
+        )
+    return builder.sign(ca_key, hashes.SHA256()).public_bytes(serialization.Encoding.PEM).decode()
+
+
 def generate_static_key() -> str:
     """OpenVPN-Static-Key (2048 Bit) im Format von 'openvpn --genkey secret' – für tls-crypt."""
     hexdata = secrets.token_hex(256)
