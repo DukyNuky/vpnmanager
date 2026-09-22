@@ -50,6 +50,10 @@ def support_contact(db: Session) -> str:
     return get_setting(db, "support", "") or ""
 
 
+def windows_client(db: Session) -> str:
+    return get_setting(db, "windows_client", "connect") or "connect"
+
+
 def slugify(text: str) -> str:
     text = text.lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()

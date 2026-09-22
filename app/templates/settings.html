@@ -43,6 +43,11 @@
   <label for="support">Ansprechpartner / Support</label>
   <input type="text" id="support" name="support" value="{{ s.support }}" placeholder="IT-Abteilung, Tel. 0123 456789, it@firma.de">
   <div class="hint">Wird in der Anleitung für Mitarbeiter angegeben.</div>
+  <label for="windows_client">VPN-App für Windows in der Anleitung</label>
+  <select id="windows_client" name="windows_client">
+    {% for key, label in windows_clients.items() %}<option value="{{ key }}" {{ 'selected' if s.windows_client == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <div class="hint">Beide funktionieren mit denselben Profilen. OpenVPN Connect ist kostenlos, aber nicht quelloffen; OpenVPN GUI ist der Open-Source-Client der Community (Installation braucht Adminrechte). macOS, Android und iOS nutzen immer OpenVPN Connect.</div>
 
   <div class="actions"><button type="submit">Speichern</button></div>
 </form>

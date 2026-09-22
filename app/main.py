@@ -79,6 +79,7 @@ def fmt_bytes(n: int | None) -> str:
 templates.env.filters["dt"] = fmt_dt
 templates.env.filters["bytes"] = fmt_bytes
 templates.env.globals["platforms"] = package.PLATFORM_LABELS
+templates.env.globals["windows_clients"] = package.WINDOWS_CLIENTS
 
 
 def csrf_token(request: Request) -> str:
@@ -349,6 +350,7 @@ def _settings_ctx(db: Session) -> dict:
         "public_host": get_setting(db, "public_host", ""),
         "company": get_setting(db, "company", ""),
         "support": get_setting(db, "support", ""),
+        "windows_client": services.windows_client(db),
     }
 
 
@@ -372,6 +374,8 @@ async def settings_submit(request: Request, db: Session = Depends(get_db), admin
         set_setting(db, "opn_secret_enc", encrypt(form["api_secret"].strip()))
     for key in ("public_host", "company", "support"):
         set_setting(db, key, form.get(key, "").strip())
+    if form.get("windows_client") in package.WINDOWS_CLIENTS:
+        set_setting(db, "windows_client", form["windows_client"])
     audit(db, admin.username, "settings.update", f"OPNsense: {url}")
     db.commit()
     flash(request, "Einstellungen gespeichert.")
@@ -665,7 +669,8 @@ def user_detail(user_id: int, request: Request, db: Session = Depends(get_db), a
 @app.get("/users/{user_id}/package.zip")
 def user_package(user_id: int, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
     u = _get_user(db, user_id)
-    filename, data = package.build_zip(u.tunnel, u, services.company(db), services.support_contact(db))
+    filename, data = package.build_zip(u.tunnel, u, services.company(db), services.support_contact(db),
+                                       services.windows_client(db))
     audit(db, admin.username, "user.download", u.username)
     db.commit()
     return Response(data, media_type="application/zip",

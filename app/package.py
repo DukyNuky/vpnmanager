@@ -22,6 +22,14 @@ PLATFORM_LABELS = {
 }
 
 CLIENT_URL = "https://openvpn.net/client/"
+COMMUNITY_URL = "https://openvpn.net/community-downloads/"
+
+# Welcher Windows-Client in der Anleitung beschrieben wird (Einstellung "windows_client")
+WINDOWS_CLIENTS = {
+    "connect": "OpenVPN Connect (Standard)",
+    "gui": "OpenVPN GUI (Community, Open Source)",
+    "both": "Beide (Connect, GUI als Alternative)",
+}
 
 GUIDES: dict[str, list[str]] = {
     "windows": [
@@ -35,6 +43,20 @@ GUIDES: dict[str, list[str]] = {
         "Geben Sie Ihr Passwort ein. Danach werden Sie nach dem „{otp}“ gefragt: Tragen Sie den aktuellen "
         "6-stelligen Code aus Ihrer Authenticator-App ein.",
         "Wird der Schalter grün, sind Sie verbunden. Zum Trennen schalten Sie ihn wieder aus.",
+    ],
+    "windows_gui": [
+        f"Laden Sie den Windows-Installer von „OpenVPN Community“ herunter ({COMMUNITY_URL}, "
+        "„Windows 64-bit MSI installer“) und installieren Sie ihn mit den Standardeinstellungen. "
+        "Dafür sind Administratorrechte nötig – wenden Sie sich ggf. an Ihre IT.",
+        "Entpacken Sie die ZIP-Datei (Rechtsklick → „Alle extrahieren…“).",
+        "Starten Sie „OpenVPN GUI“ über das Startmenü. Unten rechts in der Taskleiste erscheint ein Symbol "
+        "(Bildschirm mit Schloss), ggf. hinter dem Pfeil „^“.",
+        "Klicken Sie mit der rechten Maustaste auf das Symbol → „Datei importieren…“ (engl. „Import file…“) "
+        "und wählen Sie die Datei „{file}“ aus.",
+        "Rechtsklick auf das Symbol → „Verbinden“ (bei mehreren Profilen zuerst das Profil auswählen).",
+        "Tragen Sie Benutzername „{user}“ und Ihr Passwort ein und klicken Sie auf „OK“. Danach werden Sie "
+        "nach dem „{otp}“ gefragt: Tragen Sie den aktuellen 6-stelligen Code aus Ihrer Authenticator-App ein.",
+        "Wird das Symbol grün, sind Sie verbunden. Trennen: Rechtsklick → „Trennen“.",
     ],
     "macos": [
         f"Laden Sie die App „OpenVPN Connect“ für macOS herunter ({CLIENT_URL}) und installieren Sie sie.",
@@ -149,6 +171,9 @@ class _Pdf(FPDF):
         self.set_y(40)
 
     def h2(self, text: str):
+        # Überschrift nicht allein am Seitenende stehen lassen
+        if self.get_y() > self.h - self.b_margin - 30:
+            self.add_page()
         self.ln(3)
         self.use("B", 13)
         self.set_text_color(30, 64, 120)
@@ -197,7 +222,33 @@ def otp_uri(user: VpnUser, seed: str, company: str) -> str:
     return pyotp.TOTP(seed).provisioning_uri(name=user.username, issuer_name=f"{company or 'VPN'} VPN")
 
 
-def guide_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str, ovpn_file: str) -> bytes:
+def _guide_sections(platform: str, windows_client: str) -> list[tuple[str, str]]:
+    """Liste von (Überschrift, Guide-Schlüssel) für die gewählte Plattform."""
+    platforms = ["windows", "macos", "android", "ios"] if platform == "all" else [platform]
+    sections = []
+    for p in platforms:
+        if p != "windows":
+            sections.append((f"Schritt 2: VPN einrichten – {PLATFORM_LABELS[p]}", p))
+        elif windows_client == "gui":
+            sections.append(("Schritt 2: VPN einrichten – Windows (OpenVPN GUI)", "windows_gui"))
+        elif windows_client == "both":
+            sections.append(("Schritt 2: VPN einrichten – Windows (OpenVPN Connect)", "windows"))
+            sections.append(("Alternative für Windows: OpenVPN GUI (Community)", "windows_gui"))
+        else:
+            sections.append(("Schritt 2: VPN einrichten – Windows", "windows"))
+    return sections
+
+
+def _app_names(platform: str, windows_client: str) -> str:
+    if platform == "windows" and windows_client == "gui":
+        return "OpenVPN GUI"
+    if windows_client in ("gui", "both") and platform in ("windows", "all"):
+        return "OpenVPN Connect bzw. OpenVPN GUI"
+    return "OpenVPN Connect"
+
+
+def guide_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str, ovpn_file: str,
+              windows_client: str = "connect") -> bytes:
     pdf = _Pdf(f"{company} – VPN-Anleitung für {user.username}")
     pdf.add_page()
     pdf.title_block(f"VPN-Zugang {company}".strip(), f"Anleitung für {user.full_name or user.username}")
@@ -217,15 +268,15 @@ def guide_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str, ovpn_fi
     pdf.h2("Schritt 1: Authenticator-App einrichten (einmalig)")
     pdf.steps(AUTHENTICATOR_STEPS)
 
-    platforms = ["windows", "macos", "android", "ios"] if user.platform == "all" else [user.platform]
-    for p in platforms:
-        pdf.h2(f"Schritt 2: VPN einrichten – {PLATFORM_LABELS[p]}")
-        pdf.steps([s.format(file=ovpn_file, user=user.username, otp=OTP_PROMPT) for s in GUIDES[p]])
+    for heading, key in _guide_sections(user.platform, windows_client):
+        pdf.h2(heading)
+        pdf.steps([s.format(file=ovpn_file, user=user.username, otp=OTP_PROMPT) for s in GUIDES[key]])
 
     pdf.h2("Tägliche Nutzung")
     pdf.para(
-        "Öffnen Sie OpenVPN Connect und schalten Sie die Verbindung ein. Geben Sie Passwort und den aktuellen "
-        "Code aus der Authenticator-App ein. Trennen Sie die Verbindung, wenn Sie sie nicht mehr benötigen."
+        f"Öffnen Sie {_app_names(user.platform, windows_client)} und stellen Sie die Verbindung her. Geben Sie "
+        "Passwort und den aktuellen Code aus der Authenticator-App ein. Trennen Sie die Verbindung, wenn Sie sie "
+        "nicht mehr benötigen."
     )
 
     pdf.h2("Hilfe bei Problemen")
@@ -280,17 +331,18 @@ def credentials_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str,
     return bytes(pdf.output())
 
 
-def build_zip(tunnel: Tunnel, user: VpnUser, company: str, support: str) -> tuple[str, bytes]:
+def build_zip(tunnel: Tunnel, user: VpnUser, company: str, support: str,
+              windows_client: str = "connect") -> tuple[str, bytes]:
     base = profile_basename(company, tunnel, user)
     ovpn_name = f"{base}.ovpn"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(ovpn_name, render_ovpn(tunnel, user, company))
-        zf.writestr("Anleitung.pdf", guide_pdf(tunnel, user, company, support, ovpn_name))
+        zf.writestr("Anleitung.pdf", guide_pdf(tunnel, user, company, support, ovpn_name, windows_client))
         zf.writestr("LIESMICH.txt", (
             f"VPN-Zugang für {user.full_name or user.username}\r\n\r\n"
             f"1. Anleitung.pdf öffnen und den Schritten folgen.\r\n"
-            f"2. Die Datei {ovpn_name} in die App \"OpenVPN Connect\" importieren.\r\n"
+            f"2. Die Datei {ovpn_name} in die App \"{_app_names(user.platform, windows_client)}\" importieren.\r\n"
             f"3. Anmelden mit Benutzername, Passwort und Code aus der Authenticator-App.\r\n\r\n"
             f"Die Datei {ovpn_name} ist persönlich und darf nicht weitergegeben werden.\r\n"
         ).encode("utf-8-sig"))
