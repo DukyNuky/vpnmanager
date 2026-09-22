@@ -1,7 +1,9 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, event, select
+from sqlalchemy import (
+    Boolean, Column, DateTime, ForeignKey, Integer, String, Table, Text, create_engine, event, select,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from .config import settings
@@ -16,6 +18,15 @@ class Base(DeclarativeBase):
     pass
 
 
+# Zuordnung Admin ↔ Tunnel für Admins ohne Vollzugriff
+admin_tunnels = Table(
+    "admin_tunnels",
+    Base.metadata,
+    Column("admin_id", ForeignKey("admins.id", ondelete="CASCADE"), primary_key=True),
+    Column("tunnel_id", ForeignKey("tunnels.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Admin(Base):
     """Benutzer der Weboberfläche (nicht VPN-Benutzer)."""
     __tablename__ = "admins"
@@ -27,6 +38,15 @@ class Admin(Base):
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime)
+    # Vollzugriff: alle Tunnel, Einstellungen, Administratoren. Sonst nur die zugewiesenen Tunnel.
+    full_access: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    tunnels: Mapped[list["Tunnel"]] = relationship(
+        secondary=admin_tunnels, back_populates="admins", order_by="Tunnel.name"
+    )
+
+    def can_access(self, tunnel: "Tunnel") -> bool:
+        return self.full_access or any(t.id == tunnel.id for t in self.tunnels)
 
 
 class Setting(Base):
@@ -77,6 +97,7 @@ class Tunnel(Base):
     users: Mapped[list["VpnUser"]] = relationship(
         back_populates="tunnel", cascade="all, delete-orphan", order_by="VpnUser.username"
     )
+    admins: Mapped[list[Admin]] = relationship(secondary=admin_tunnels, back_populates="tunnels")
 
     @property
     def route_list(self) -> list[str]:
@@ -156,6 +177,7 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 # Spalten, die nach der ersten Version hinzugekommen sind (SQLite: create_all ergänzt keine Spalten)
 _ADDED_COLUMNS = {
     "tunnels": [("opn_crl_refid", "VARCHAR(32)"), ("revoked_serials", "TEXT DEFAULT '[]'")],
+    "admins": [("full_access", "BOOLEAN NOT NULL DEFAULT 1")],
 }
 
 

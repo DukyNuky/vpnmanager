@@ -7,11 +7,11 @@
   </div>
   <div class="actions" style="margin:0">
     <a class="btn" href="/tunnels/{{ t.id }}/users/new">+ Benutzer anlegen</a>
-    <a class="btn secondary" href="/tunnels/{{ t.id }}/edit">Einstellungen</a>
+    {% if admin.full_access %}<a class="btn secondary" href="/tunnels/{{ t.id }}/edit">Einstellungen</a>{% endif %}
     <form method="post" action="/tunnels/{{ t.id }}/restart" class="inline" onsubmit="return confirm('Tunnel neu starten? Verbundene Benutzer werden kurz getrennt.')">
       <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neu starten</button>
     </form>
-    <a class="btn danger" href="/tunnels/{{ t.id }}/delete">Löschen</a>
+    {% if admin.full_access %}<a class="btn danger" href="/tunnels/{{ t.id }}/delete">Löschen</a>{% endif %}
   </div>
 </div>
 
@@ -22,11 +22,11 @@
     <dt>Tunnel-Netz</dt><dd class="mono">{{ t.network }}</dd>
     {% if t.dns_list %}<dt>DNS</dt><dd class="mono">{{ t.dns_list | join(', ') }}{% if t.dns_domain %} ({{ t.dns_domain }}){% endif %}</dd>{% endif %}
     <dt>Anmeldung</dt><dd>Zertifikat + Passwort + 2FA ({{ t.auth_server }})</dd>
-    <dt>Firewall-Regeln</dt><dd>{% if t.fw_rule_list %}automatisch verwaltet{% else %}manuell
+    <dt>Firewall-Regeln</dt><dd>{% if t.fw_rule_list %}automatisch verwaltet{% else %}manuell{% if admin.full_access %}
       <form method="post" action="/tunnels/{{ t.id }}/fw-rules" class="inline" style="margin-left:8px"
             onsubmit="return confirm('Firewall-Regeln für diesen Tunnel automatisch anlegen (Einwahl auf WAN + Zugriff der VPN-Benutzer)?')">
         <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="small secondary">Jetzt automatisch anlegen</button></form>
-      {% endif %}</dd>
+      {% endif %}{% endif %}</dd>
   </dl>
   <div class="actions">
     <button class="secondary small" hx-post="/tunnels/{{ t.id }}/check" hx-target="#check-result">

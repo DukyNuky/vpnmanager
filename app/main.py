@@ -132,6 +132,10 @@ class CsrfError(Exception):
     pass
 
 
+class Forbidden(Exception):
+    pass
+
+
 @app.exception_handler(LoginRequired)
 async def _login_required(request: Request, _exc):
     if request.headers.get("HX-Request"):
@@ -142,6 +146,12 @@ async def _login_required(request: Request, _exc):
 @app.exception_handler(TotpSetupRequired)
 async def _totp_required(request: Request, _exc):
     return redirect("/account/totp")
+
+
+@app.exception_handler(Forbidden)
+async def _forbidden(request: Request, _exc):
+    return render(request, "error.html", message="Dafür fehlt Ihnen die Berechtigung. Bitte wenden Sie sich an einen "
+                                                  "Administrator mit Vollzugriff.", status_code=403)
 
 
 @app.exception_handler(CsrfError)
@@ -159,6 +169,19 @@ def require_admin(request: Request, db: Session = Depends(get_db)) -> Admin:
         raise TotpSetupRequired()
     request.state.admin = admin
     return admin
+
+
+def require_full_admin(admin: Admin = Depends(require_admin)) -> Admin:
+    """Einstellungen, Administratoren, Tunnel anlegen/ändern/löschen – nur mit Vollzugriff."""
+    if not admin.full_access:
+        raise Forbidden()
+    return admin
+
+
+def visible_tunnels(db: Session, admin: Admin) -> list[Tunnel]:
+    if admin.full_access:
+        return list(db.scalars(select(Tunnel).order_by(Tunnel.name)).all())
+    return list(admin.tunnels)
 
 
 # einfacher Schutz gegen Passwort-Raten: 5 Fehlversuche → 5 Minuten Sperre
@@ -324,15 +347,15 @@ async def totp_setup_submit(request: Request, db: Session = Depends(get_db),
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    tunnels = db.scalars(select(Tunnel).order_by(Tunnel.name)).all()
-    log_entries = db.scalars(select(AuditLog).order_by(AuditLog.ts.desc()).limit(10)).all()
+    tunnels = visible_tunnels(db, admin)
+    log_entries = db.scalars(select(AuditLog).order_by(AuditLog.ts.desc()).limit(10)).all() if admin.full_access else []
     return render(request, "dashboard.html", tunnels=tunnels, log_entries=log_entries,
                   configured=services.opn_configured(db))
 
 
 @app.get("/partials/overview", response_class=HTMLResponse)
 async def overview_partial(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    tunnels = db.scalars(select(Tunnel).order_by(Tunnel.name)).all()
+    tunnels = visible_tunnels(db, admin)
     error, status = None, {}
     try:
         status = await services.fetch_status(db)
@@ -356,7 +379,7 @@ def _settings_ctx(db: Session) -> dict:
 
 
 @app.get("/settings", response_class=HTMLResponse)
-async def settings_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def settings_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     auth_servers = (await _auth_servers(db, timeout=5))[0] if services.opn_configured(db) else []
     return render(request, "settings.html", s=_settings_ctx(db), tpl=services.tunnel_template(db),
                   auth_servers=auth_servers)
@@ -364,7 +387,7 @@ async def settings_form(request: Request, db: Session = Depends(get_db), admin: 
 
 @app.post("/settings/tunnel-defaults")
 async def settings_tunnel_defaults(request: Request, db: Session = Depends(get_db),
-                                   admin: Admin = Depends(require_admin)):
+                                   admin: Admin = Depends(require_full_admin)):
     form = await form_data(request)
     try:
         tpl = services.validate_template(form)
@@ -381,7 +404,7 @@ async def settings_tunnel_defaults(request: Request, db: Session = Depends(get_d
 
 
 @app.post("/settings")
-async def settings_submit(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def settings_submit(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     form = await form_data(request)
     url = form.get("opn_url", "").strip().rstrip("/")
     if url and not url.startswith(("https://", "http://")):
@@ -404,7 +427,7 @@ async def settings_submit(request: Request, db: Session = Depends(get_db), admin
 
 
 @app.post("/settings/test", response_class=HTMLResponse)
-async def settings_test(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def settings_test(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     """Testet die Verbindung – mit den Werten aus dem Formular (noch nicht gespeichert) oder den gespeicherten."""
     form = await form_data(request)
     url = form.get("opn_url", "").strip().rstrip("/") or get_setting(db, "opn_url", "")
@@ -432,11 +455,43 @@ async def settings_test(request: Request, db: Session = Depends(get_db), admin: 
 
 @app.get("/admins", response_class=HTMLResponse)
 def admins_list(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    return render(request, "admins.html", admins=db.scalars(select(Admin).order_by(Admin.username)).all())
+    admins = db.scalars(select(Admin).order_by(Admin.username)).all() if admin.full_access else []
+    tunnels = db.scalars(select(Tunnel).order_by(Tunnel.name)).all() if admin.full_access else []
+    return render(request, "admins.html", admins=admins, tunnels=tunnels)
+
+
+async def _access_from_form(request: Request, db: Session) -> tuple[bool, list[Tunnel]]:
+    form = await request.form()  # bereits von form_data() geprüft und gecacht
+    full = form.get("access") != "limited"
+    ids = {int(i) for i in form.getlist("tunnel_ids") if str(i).isdigit()}
+    tunnels = [t for t in db.scalars(select(Tunnel)).all() if t.id in ids] if not full else []
+    return full, tunnels
+
+
+@app.post("/admins/{admin_id}/access")
+async def admins_access(admin_id: int, request: Request, db: Session = Depends(get_db),
+                        admin: Admin = Depends(require_full_admin)):
+    await form_data(request)
+    target = db.get(Admin, admin_id)
+    if target is None:
+        raise NotFound()
+    full, tunnels = await _access_from_form(request, db)
+    if target.id == admin.id and not full:
+        flash(request, "Den eigenen Vollzugriff können Sie nicht entfernen.", "error")
+        return redirect("/admins")
+    if not full and not tunnels:
+        flash(request, "Bitte mindestens einen Tunnel auswählen oder Vollzugriff vergeben.", "error")
+        return redirect("/admins")
+    target.full_access, target.tunnels = full, tunnels
+    audit(db, admin.username, "admin.access",
+          f"{target.username}: " + ("Vollzugriff" if full else ", ".join(t.name for t in tunnels)))
+    db.commit()
+    flash(request, f"Berechtigungen von „{target.username}“ gespeichert.")
+    return redirect("/admins")
 
 
 @app.post("/admins/new")
-async def admins_new(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def admins_new(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     form = await form_data(request)
     username = form.get("username", "").strip()
     error = _check_new_password(form.get("password", ""), form.get("password2", ""))
@@ -447,8 +502,13 @@ async def admins_new(request: Request, db: Session = Depends(get_db), admin: Adm
     if error:
         flash(request, error, "error")
         return redirect("/admins")
-    db.add(Admin(username=username, password_hash=hash_password(form["password"])))
-    audit(db, admin.username, "admin.create", username)
+    full, tunnels = await _access_from_form(request, db)
+    if not full and not tunnels:
+        flash(request, "Bitte mindestens einen Tunnel auswählen oder Vollzugriff vergeben.", "error")
+        return redirect("/admins")
+    db.add(Admin(username=username, password_hash=hash_password(form["password"]), full_access=full, tunnels=tunnels))
+    audit(db, admin.username, "admin.create",
+          f"{username}: " + ("Vollzugriff" if full else ", ".join(t.name for t in tunnels)))
     db.commit()
     flash(request, f"Administrator „{username}“ angelegt. Die 2FA wird bei der ersten Anmeldung eingerichtet.")
     return redirect("/admins")
@@ -456,7 +516,7 @@ async def admins_new(request: Request, db: Session = Depends(get_db), admin: Adm
 
 @app.post("/admins/{admin_id}/delete")
 async def admins_delete(admin_id: int, request: Request, db: Session = Depends(get_db),
-                        admin: Admin = Depends(require_admin)):
+                        admin: Admin = Depends(require_full_admin)):
     await form_data(request)
     target = db.get(Admin, admin_id)
     if target and target.id != admin.id:
@@ -469,7 +529,7 @@ async def admins_delete(admin_id: int, request: Request, db: Session = Depends(g
 
 @app.post("/admins/{admin_id}/reset-2fa")
 async def admins_reset_2fa(admin_id: int, request: Request, db: Session = Depends(get_db),
-                           admin: Admin = Depends(require_admin)):
+                           admin: Admin = Depends(require_full_admin)):
     await form_data(request)
     target = db.get(Admin, admin_id)
     if target and target.id != admin.id:
@@ -496,17 +556,19 @@ async def account_password(request: Request, db: Session = Depends(get_db), admi
 
 
 @app.get("/log", response_class=HTMLResponse)
-def audit_log(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+def audit_log(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     entries = db.scalars(select(AuditLog).order_by(AuditLog.ts.desc()).limit(500)).all()
     return render(request, "log.html", entries=entries)
 
 
 # ------------------------------------------------------------------ Tunnel
 
-def _get_tunnel(db: Session, tunnel_id: int) -> Tunnel:
+def _get_tunnel(db: Session, tunnel_id: int, admin: Admin) -> Tunnel:
     t = db.get(Tunnel, tunnel_id)
     if t is None:
         raise NotFound()
+    if not admin.can_access(t):
+        raise Forbidden()
     return t
 
 
@@ -528,7 +590,7 @@ async def _auth_servers(db: Session, timeout: float = 30) -> tuple[list[str], st
 
 
 @app.get("/tunnels/new", response_class=HTMLResponse)
-async def tunnel_new_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def tunnel_new_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     if not services.opn_configured(db):
         flash(request, "Bitte zuerst die Verbindung zur OPNsense einrichten.", "error")
         return redirect("/settings")
@@ -538,7 +600,7 @@ async def tunnel_new_form(request: Request, db: Session = Depends(get_db), admin
 
 
 @app.post("/tunnels/new")
-async def tunnel_new_submit(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
+async def tunnel_new_submit(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     form = await form_data(request)
     try:
         data = services.validate_tunnel(db, form)
@@ -556,13 +618,13 @@ async def tunnel_new_submit(request: Request, db: Session = Depends(get_db), adm
 @app.get("/tunnels/{tunnel_id}", response_class=HTMLResponse)
 def tunnel_detail(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                   admin: Admin = Depends(require_admin)):
-    return render(request, "tunnel.html", t=_get_tunnel(db, tunnel_id))
+    return render(request, "tunnel.html", t=_get_tunnel(db, tunnel_id, admin))
 
 
 @app.get("/tunnels/{tunnel_id}/status", response_class=HTMLResponse)
 async def tunnel_status(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                         admin: Admin = Depends(require_admin)):
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     error, st = None, None
     try:
         st = (await services.fetch_status(db)).get(t.opn_instance_uuid, {"running": False, "known": False,
@@ -576,8 +638,8 @@ async def tunnel_status(tunnel_id: int, request: Request, db: Session = Depends(
 
 @app.get("/tunnels/{tunnel_id}/edit", response_class=HTMLResponse)
 def tunnel_edit_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
-                     admin: Admin = Depends(require_admin)):
-    t = _get_tunnel(db, tunnel_id)
+                     admin: Admin = Depends(require_full_admin)):
+    t = _get_tunnel(db, tunnel_id, admin)
     f = {k: getattr(t, k) for k in ("name", "public_host", "port", "proto", "network", "mode", "routes",
                                      "dns_servers", "dns_domain", "session_hours", "auth_server")}
     return render(request, "tunnel_form.html", f=f, t=t, new=False)
@@ -585,8 +647,8 @@ def tunnel_edit_form(tunnel_id: int, request: Request, db: Session = Depends(get
 
 @app.post("/tunnels/{tunnel_id}/edit")
 async def tunnel_edit_submit(tunnel_id: int, request: Request, db: Session = Depends(get_db),
-                             admin: Admin = Depends(require_admin)):
-    t = _get_tunnel(db, tunnel_id)
+                             admin: Admin = Depends(require_full_admin)):
+    t = _get_tunnel(db, tunnel_id, admin)
     form = await form_data(request)
     try:
         data = services.validate_tunnel(db, form, existing=t)
@@ -605,7 +667,7 @@ async def tunnel_edit_submit(tunnel_id: int, request: Request, db: Session = Dep
 async def tunnel_check(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                        admin: Admin = Depends(require_admin)):
     await form_data(request)
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     try:
         checks, error = await services.check_tunnel(db, t), None
     except OPNsenseError as exc:
@@ -616,9 +678,9 @@ async def tunnel_check(tunnel_id: int, request: Request, db: Session = Depends(g
 
 @app.post("/tunnels/{tunnel_id}/fw-rules")
 async def tunnel_fw_rules(tunnel_id: int, request: Request, db: Session = Depends(get_db),
-                          admin: Admin = Depends(require_admin)):
+                          admin: Admin = Depends(require_full_admin)):
     await form_data(request)
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     try:
         await services.create_fw_rules(db, admin.username, t)
         flash(request, "Firewall-Regeln wurden angelegt und aktiviert.")
@@ -632,7 +694,7 @@ async def tunnel_fw_rules(tunnel_id: int, request: Request, db: Session = Depend
 async def tunnel_restart(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                          admin: Admin = Depends(require_admin)):
     await form_data(request)
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     try:
         await services.restart_tunnel(db, admin.username, t)
         flash(request, "Tunnel wird neu gestartet. Verbundene Benutzer verbinden sich automatisch neu.")
@@ -643,15 +705,15 @@ async def tunnel_restart(tunnel_id: int, request: Request, db: Session = Depends
 
 @app.get("/tunnels/{tunnel_id}/delete", response_class=HTMLResponse)
 def tunnel_delete_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
-                       admin: Admin = Depends(require_admin)):
-    return render(request, "tunnel_delete.html", t=_get_tunnel(db, tunnel_id))
+                       admin: Admin = Depends(require_full_admin)):
+    return render(request, "tunnel_delete.html", t=_get_tunnel(db, tunnel_id, admin))
 
 
 @app.post("/tunnels/{tunnel_id}/delete")
 async def tunnel_delete(tunnel_id: int, request: Request, db: Session = Depends(get_db),
-                        admin: Admin = Depends(require_admin)):
+                        admin: Admin = Depends(require_full_admin)):
     form = await form_data(request)
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     if form.get("confirm_name", "").strip() != t.name:
         flash(request, "Zum Löschen bitte den Tunnelnamen exakt eingeben.", "error")
         return redirect(f"/tunnels/{t.id}/delete")
@@ -670,7 +732,7 @@ async def tunnel_delete(tunnel_id: int, request: Request, db: Session = Depends(
 async def tunnel_kill(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                       admin: Admin = Depends(require_admin)):
     form = await form_data(request)
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     name = form.get("common_name", "").strip()
     user = next((u for u in t.users if u.username == name), None)
     try:
@@ -690,23 +752,25 @@ async def tunnel_kill(tunnel_id: int, request: Request, db: Session = Depends(ge
 
 # ------------------------------------------------------------------ VPN-Benutzer
 
-def _get_user(db: Session, user_id: int) -> VpnUser:
+def _get_user(db: Session, user_id: int, admin: Admin) -> VpnUser:
     u = db.get(VpnUser, user_id)
     if u is None:
         raise NotFound()
+    if not admin.can_access(u.tunnel):
+        raise Forbidden()
     return u
 
 
 @app.get("/tunnels/{tunnel_id}/users/new", response_class=HTMLResponse)
 def user_new_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                   admin: Admin = Depends(require_admin)):
-    return render(request, "user_form.html", t=_get_tunnel(db, tunnel_id), f={"platform": "all"})
+    return render(request, "user_form.html", t=_get_tunnel(db, tunnel_id, admin), f={"platform": "all"})
 
 
 @app.post("/tunnels/{tunnel_id}/users/new")
 async def user_new_submit(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                           admin: Admin = Depends(require_admin)):
-    t = _get_tunnel(db, tunnel_id)
+    t = _get_tunnel(db, tunnel_id, admin)
     form = await form_data(request)
     try:
         u = await services.create_user(db, admin.username, t, form)
@@ -719,7 +783,7 @@ async def user_new_submit(tunnel_id: int, request: Request, db: Session = Depend
 
 @app.get("/users/{user_id}", response_class=HTMLResponse)
 def user_detail(user_id: int, request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     ctx = {"u": u, "t": u.tunnel}
     if u.has_pending:
         ctx["password"] = decrypt(u.pending_password_enc)
@@ -732,7 +796,7 @@ def user_detail(user_id: int, request: Request, db: Session = Depends(get_db), a
 
 @app.get("/users/{user_id}/package.zip")
 def user_package(user_id: int, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     filename, data = package.build_zip(u.tunnel, u, services.company(db), services.support_contact(db),
                                        services.windows_client(db))
     audit(db, admin.username, "user.download", u.username)
@@ -744,7 +808,7 @@ def user_package(user_id: int, db: Session = Depends(get_db), admin: Admin = Dep
 @app.get("/users/{user_id}/zugangsdaten.pdf")
 def user_credentials_pdf(user_id: int, request: Request, db: Session = Depends(get_db),
                          admin: Admin = Depends(require_admin)):
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     if not u.has_pending:
         flash(request, "Die Zugangsdaten sind nicht mehr abrufbar. Bitte Passwort bzw. 2FA neu erzeugen.", "error")
         return redirect(f"/users/{u.id}")
@@ -769,7 +833,7 @@ USER_ACTIONS = {
 async def user_pending_done(user_id: int, request: Request, db: Session = Depends(get_db),
                             admin: Admin = Depends(require_admin)):
     await form_data(request)
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     services.clear_pending(u)
     audit(db, admin.username, "user.handover", u.username)
     db.commit()
@@ -781,7 +845,7 @@ async def user_pending_done(user_id: int, request: Request, db: Session = Depend
 async def user_delete(user_id: int, request: Request, db: Session = Depends(get_db),
                       admin: Admin = Depends(require_admin)):
     await form_data(request)
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     tunnel_id = u.tunnel_id
     try:
         await services.delete_user(db, admin.username, u)
@@ -796,7 +860,7 @@ async def user_delete(user_id: int, request: Request, db: Session = Depends(get_
 async def user_action(user_id: int, action: str, request: Request, db: Session = Depends(get_db),
                       admin: Admin = Depends(require_admin)):
     await form_data(request)
-    u = _get_user(db, user_id)
+    u = _get_user(db, user_id, admin)
     if action not in USER_ACTIONS:
         raise NotFound()
     fn, message = USER_ACTIONS[action]

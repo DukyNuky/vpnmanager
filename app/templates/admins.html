@@ -1,17 +1,38 @@
 {% extends "base.html" %}
+
+{% macro access_fields(prefix, full, selected_ids) %}
+  <div class="segmented">
+    <label><input type="radio" name="access" value="full" {{ 'checked' if full }} onchange="toggleTunnels(this)">
+      <strong>Vollzugriff</strong><span class="small muted">Alle Tunnel, Einstellungen, Administratoren</span></label>
+    <label><input type="radio" name="access" value="limited" {{ 'checked' if not full }} onchange="toggleTunnels(this)">
+      <strong>Nur zugewiesene Tunnel</strong><span class="small muted">Benutzer anlegen/verwalten, Status sehen</span></label>
+  </div>
+  <div class="tunnel-choice" {{ 'hidden' if full }} style="margin-top:10px">
+    {% for t in tunnels %}
+    <label class="inline"><input type="checkbox" name="tunnel_ids" value="{{ t.id }}" {{ 'checked' if t.id in selected_ids }}> {{ t.name }}
+      <span class="muted small mono">{{ t.public_host }}:{{ t.port }}</span></label>
+    {% else %}
+    <p class="small muted">Noch keine Tunnel vorhanden.</p>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
 {% block content %}
+{% if admin.full_access %}
 <div class="page-head"><div><h1>Administratoren</h1><div class="sub">Zugänge zu diesem Tool (nicht die VPN-Benutzer)</div></div></div>
 <div class="grid" style="grid-template-columns: minmax(0,3fr) minmax(0,2fr)">
 <div class="card">
   <div class="table-wrap">
   <table>
-    <tr><th>Benutzer</th><th>2FA</th><th>Letzte Anmeldung</th><th></th></tr>
+    <tr><th>Benutzer</th><th>Zugriff</th><th>2FA</th><th>Letzte Anmeldung</th><th></th></tr>
     {% for a in admins %}
     <tr>
       <td><strong>{{ a.username }}</strong>{% if a.id == admin.id %} <span class="muted small">(Sie)</span>{% endif %}</td>
+      <td>{% if a.full_access %}<span class="badge ok">Vollzugriff</span>
+          {% else %}{% for t in a.tunnels %}<span class="badge">{{ t.name }}</span> {% else %}<span class="badge warn">keine Tunnel</span>{% endfor %}{% endif %}</td>
       <td>{% if a.totp_enabled %}<span class="badge ok">aktiv</span>{% else %}<span class="badge warn">ausstehend</span>{% endif %}</td>
       <td class="small">{{ a.last_login | dt }}</td>
-      <td style="text-align:right">
+      <td style="text-align:right;white-space:nowrap">
         {% if a.id != admin.id %}
         <form method="post" action="/admins/{{ a.id }}/reset-2fa" class="inline" onsubmit="return confirm('2FA von {{ a.username }} zurücksetzen?')">
           <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="small secondary">2FA zurücksetzen</button></form>
@@ -20,6 +41,20 @@
         {% endif %}
       </td>
     </tr>
+    {% if a.id != admin.id %}
+    <tr>
+      <td colspan="5" style="padding-top:0">
+        <details>
+          <summary class="small">Zugriff ändern</summary>
+          <form method="post" action="/admins/{{ a.id }}/access" style="margin-top:8px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            {{ access_fields('a' ~ a.id, a.full_access, a.tunnels | map(attribute='id') | list) }}
+            <div class="actions"><button class="small">Speichern</button></div>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {% endif %}
     {% endfor %}
   </table>
   </div>
@@ -31,9 +66,18 @@
   <label for="nu">Benutzername</label><input type="text" id="nu" name="username" required autocomplete="off">
   <label for="np">Startpasswort</label><input type="password" id="np" name="password" required minlength="12" autocomplete="new-password">
   <label for="np2">Wiederholen</label><input type="password" id="np2" name="password2" required minlength="12" autocomplete="new-password">
+  <label>Zugriff</label>
+  {{ access_fields('new', False, []) }}
   <div class="hint">Die 2FA wird bei der ersten Anmeldung eingerichtet.</div>
   <div class="actions"><button type="submit">Hinzufügen</button></div>
 </form>
+{% endif %}
+
+{% if not admin.full_access %}
+<div class="page-head"><div><h1>Mein Konto</h1>
+  <div class="sub">Zugewiesene Tunnel: {{ admin.tunnels | map(attribute='name') | join(', ') or 'keine' }}</div></div></div>
+<div style="max-width:460px">
+{% endif %}
 <form method="post" action="/account/password" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
   <h2>Eigenes Passwort ändern</h2>
@@ -43,5 +87,14 @@
   <div class="actions"><button type="submit">Ändern</button></div>
 </form>
 </div>
-</div>
+{% if admin.full_access %}</div>{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleTunnels(radio) {
+  const box = radio.closest('form').querySelector('.tunnel-choice');
+  if (box) box.hidden = radio.value !== 'limited';
+}
+</script>
 {% endblock %}

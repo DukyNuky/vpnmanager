@@ -5,10 +5,15 @@
     <h1>Übersicht</h1>
     <div class="sub">VPN-Tunnel auf der OPNsense und verbundene Mitarbeiter</div>
   </div>
-  {% if configured %}<a class="btn" href="/tunnels/new">+ Neuer Tunnel</a>{% endif %}
+  {% if configured and admin.full_access %}<a class="btn" href="/tunnels/new">+ Neuer Tunnel</a>{% endif %}
 </div>
 
-{% if not configured %}
+{% if not admin.full_access and not tunnels %}
+<div class="card">
+  <h2>Kein Tunnel zugewiesen</h2>
+  <p>Ihrem Zugang ist noch kein VPN-Tunnel zugewiesen. Bitte wenden Sie sich an einen Administrator mit Vollzugriff.</p>
+</div>
+{% elif not configured %}
 <div class="card">
   <h2>Willkommen!</h2>
   <p>Als Erstes wird die Verbindung zur OPNsense eingerichtet (URL, API-Key und Secret).</p>

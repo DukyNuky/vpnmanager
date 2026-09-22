@@ -10,6 +10,8 @@ Den Code fragt OpenVPN Connect in einem eigenen Feld ab ("static-challenge").
 ## Funktionen
 
 - Login für Administratoren mit Pflicht-2FA (TOTP), Sperre nach 5 Fehlversuchen
+- Administratoren mit **Vollzugriff** oder **nur zugewiesenen Tunneln** (verwalten dort Benutzer und sehen den Status,
+  aber keine Einstellungen und keine anderen Tunnel)
 - OPNsense-Verbindung im Tool einrichten, inkl. **Verbindungstest**, der jede benötigte API-Berechtigung einzeln prüft
 - Tunnel (OpenVPN-Instanzen) anlegen, ändern, neu starten, löschen
   - eigene CA pro Tunnel (der CA-Key bleibt im Tool), Server-Zertifikat, tls-crypt-Key
@@ -20,6 +22,8 @@ Den Code fragt OpenVPN Connect in einem eigenen Feld ab ("static-challenge").
 - Zugangsdatenblatt (PDF mit Passwort + QR-Code), getrennt vom Paket, wird nach Übergabe aus dem Tool gelöscht
 - Status: Dienst läuft/gestoppt, verbundene Benutzer mit IP, Traffic, Verbindungsdauer, Verbindung trennen
 - Benutzer sperren/entsperren, neues Passwort, neuer 2FA-Schlüssel, Profil neu ausstellen, löschen
+- Sperren wirkt sofort über eine Sperrliste (CRL) je Tunnel, die das Tool signiert und auf die OPNsense lädt.
+  Sie greift auch bei automatischer Wiederverbindung per Sitzungs-Token
 - Protokoll aller Aktionen
 
 ## Installation beim Kunden

@@ -15,9 +15,13 @@
     {% set p = request.url.path %}
     <nav>
       <a href="/" class="{{ 'active' if p == '/' or p.startswith('/tunnels') or p.startswith('/users') }}">Übersicht</a>
+      {% if admin.full_access %}
       <a href="/settings" class="{{ 'active' if p.startswith('/settings') }}">OPNsense</a>
       <a href="/admins" class="{{ 'active' if p.startswith('/admins') }}">Administratoren</a>
       <a href="/log" class="{{ 'active' if p.startswith('/log') }}">Protokoll</a>
+      {% else %}
+      <a href="/admins" class="{{ 'active' if p.startswith('/admins') }}">Mein Konto</a>
+      {% endif %}
     </nav>
     <div class="user">
       <span>{{ admin.username }}</span>
