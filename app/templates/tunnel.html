@@ -21,7 +21,11 @@
     <dt>Tunnel-Netz</dt><dd class="mono">{{ t.network }}</dd>
     {% if t.dns_list %}<dt>DNS</dt><dd class="mono">{{ t.dns_list | join(', ') }}{% if t.dns_domain %} ({{ t.dns_domain }}){% endif %}</dd>{% endif %}
     <dt>Anmeldung</dt><dd>Zertifikat + Passwort + 2FA ({{ t.auth_server }})</dd>
-    <dt>Firewall-Regeln</dt><dd>{{ 'automatisch verwaltet' if t.fw_rule_list else 'manuell' }}</dd>
+    <dt>Firewall-Regeln</dt><dd>{% if t.fw_rule_list %}automatisch verwaltet{% else %}manuell
+      <form method="post" action="/tunnels/{{ t.id }}/fw-rules" class="inline" style="margin-left:8px"
+            onsubmit="return confirm('Firewall-Regeln für diesen Tunnel automatisch anlegen (Einwahl auf WAN + Zugriff der VPN-Benutzer)?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="small secondary">Jetzt automatisch anlegen</button></form>
+      {% endif %}</dd>
   </dl>
   <div class="actions">
     <button class="secondary small" hx-post="/tunnels/{{ t.id }}/check" hx-target="#check-result">

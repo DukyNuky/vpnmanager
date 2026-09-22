@@ -286,7 +286,8 @@ def _fw_rules(t: Tunnel) -> list[dict]:
 
 # ------------------------------------------------------------------ Tunnel
 
-async def create_tunnel(db: Session, actor: str, data: dict, fw_rules: bool) -> Tunnel:
+async def create_tunnel(db: Session, actor: str, data: dict, fw_rules: bool) -> tuple[Tunnel, list[str]]:
+    """Legt den Tunnel an. Rückgabe: (Tunnel, Hinweise). Fehler bei den Firewall-Regeln sind nur Hinweise."""
     t = Tunnel(**data)
     slug = slugify(t.name) or "vpn"
     ca_cert, ca_key = pki.create_ca(f"{t.name} VPN CA")
@@ -308,19 +309,50 @@ async def create_tunnel(db: Session, actor: str, data: dict, fw_rules: bool) -> 
                 raise OPNsenseError(
                     "Die OPNsense hat das Anlegen der OpenVPN-Instanz bestätigt, sie ist dort aber nicht vorhanden."
                 )
-            if fw_rules:
-                uuids = [await c.add_rule(r) for r in _fw_rules(t)]
-                t.opn_fw_rules = json.dumps(uuids)
-                await c.apply_firewall()
+            # erst nach dem Reconfigure registriert die OPNsense die Schnittstelle "OpenVPN (Group)"
             await c.reconfigure_openvpn()
         except Exception:
             await _cleanup_tunnel(c, t)
             raise
+        notes = []
+        if fw_rules:
+            try:
+                await _add_fw_rules(c, t)
+            except OPNsenseError as exc:
+                notes.append(f"Firewall-Regeln konnten nicht angelegt werden ({exc}). Der Tunnel ist trotzdem "
+                             "angelegt – Regeln auf der Tunnel-Seite erneut anlegen lassen oder manuell erstellen.")
 
     db.add(t)
     audit(db, actor, "tunnel.create", f"{t.name} ({t.proto}/{t.port}, {t.network})")
     db.commit()
-    return t
+    return t, notes
+
+
+async def _add_fw_rules(c: OPNsense, t: Tunnel) -> None:
+    """Legt die Firewall-Regeln an; bei einem Fehler werden bereits angelegte Regeln wieder entfernt."""
+    uuids: list[str] = []
+    try:
+        for rule in _fw_rules(t):
+            uuids.append(await c.add_rule(rule))
+        await c.apply_firewall()
+    except OPNsenseError:
+        for uuid in uuids:
+            try:
+                await c.delete_rule(uuid)
+            except OPNsenseError:
+                pass
+        raise
+    t.opn_fw_rules = json.dumps(uuids)
+
+
+async def create_fw_rules(db: Session, actor: str, t: Tunnel) -> None:
+    """Firewall-Regeln nachträglich anlegen (z. B. wenn es beim Anlegen des Tunnels nicht geklappt hat)."""
+    if t.fw_rule_list:
+        return
+    async with client(db) as c:
+        await _add_fw_rules(c, t)
+    audit(db, actor, "tunnel.fw_rules", t.name)
+    db.commit()
 
 
 async def _cleanup_tunnel(c: OPNsense, t: Tunnel) -> list[str]:

@@ -28,6 +28,7 @@ from .services import ValidationError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("vpnmanager")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BASE = Path(__file__).parent
 TZ = ZoneInfo(os.environ.get("TZ", "Europe/Berlin"))
@@ -541,12 +542,14 @@ async def tunnel_new_submit(request: Request, db: Session = Depends(get_db), adm
     form = await form_data(request)
     try:
         data = services.validate_tunnel(db, form)
-        t = await services.create_tunnel(db, admin.username, data, fw_rules=bool(form.get("fw_rules")))
+        t, notes = await services.create_tunnel(db, admin.username, data, fw_rules=bool(form.get("fw_rules")))
     except (ValidationError, OPNsenseError) as exc:
         auth_servers, _ = await _auth_servers(db)
         return render(request, "tunnel_form.html", f=form, auth_servers=auth_servers, error=str(exc),
                       new=True, status_code=400)
     flash(request, f"Tunnel „{t.name}“ wurde auf der OPNsense angelegt und gestartet.")
+    for n in notes:
+        flash(request, n, "warn")
     return redirect(f"/tunnels/{t.id}")
 
 
@@ -609,6 +612,20 @@ async def tunnel_check(tunnel_id: int, request: Request, db: Session = Depends(g
         checks, error = [], str(exc)
     return render(request, "partials/test_result.html", checks=checks, error=error, all_ok=False,
                   only_fw_missing=False, auth_servers=[], totp_servers=[])
+
+
+@app.post("/tunnels/{tunnel_id}/fw-rules")
+async def tunnel_fw_rules(tunnel_id: int, request: Request, db: Session = Depends(get_db),
+                          admin: Admin = Depends(require_admin)):
+    await form_data(request)
+    t = _get_tunnel(db, tunnel_id)
+    try:
+        await services.create_fw_rules(db, admin.username, t)
+        flash(request, "Firewall-Regeln wurden angelegt und aktiviert.")
+    except OPNsenseError as exc:
+        db.rollback()
+        flash(request, f"Firewall-Regeln konnten nicht angelegt werden: {exc}", "error")
+    return redirect(f"/tunnels/{t.id}")
 
 
 @app.post("/tunnels/{tunnel_id}/restart")
