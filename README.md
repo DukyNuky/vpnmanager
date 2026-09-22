@@ -12,6 +12,9 @@ Den Code fragt OpenVPN Connect in einem eigenen Feld ab ("static-challenge").
 - Login für Administratoren mit Pflicht-2FA (TOTP), Sperre nach 5 Fehlversuchen
 - Administratoren mit **Vollzugriff** oder **nur zugewiesenen Tunneln** (verwalten dort Benutzer und sehen den Status,
   aber keine Einstellungen und keine anderen Tunnel)
+- Administratoren können einen eigenen VPN-Zugang mit **demselben 2FA-Code** wie die Tool-Anmeldung erhalten
+  (ein Eintrag in der Authenticator-App). Wird die 2FA neu eingerichtet, übernimmt das Tool den neuen Schlüssel
+  automatisch auch für diese VPN-Zugänge
 - OPNsense-Verbindung im Tool einrichten, inkl. **Verbindungstest**, der jede benötigte API-Berechtigung einzeln prüft
 - Tunnel (OpenVPN-Instanzen) anlegen, ändern, neu starten, löschen
   - eigene CA pro Tunnel (der CA-Key bleibt im Tool), Server-Zertifikat, tls-crypt-Key

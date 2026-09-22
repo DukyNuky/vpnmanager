@@ -340,6 +340,16 @@ async def totp_setup_submit(request: Request, db: Session = Depends(get_db),
     audit(db, admin.username, "admin.totp", "2FA eingerichtet")
     db.commit()
     flash(request, "Zwei-Faktor-Anmeldung ist eingerichtet.")
+    if admin.vpn_users:
+        try:
+            errors = await services.sync_admin_otp(db, admin)
+        except OPNsenseError as exc:
+            errors = [str(exc)]
+        if errors:
+            flash(request, "Der neue 2FA-Schlüssel konnte nicht für alle VPN-Zugänge übernommen werden: "
+                  + "; ".join(errors), "error")
+        else:
+            flash(request, "Der neue 2FA-Code gilt auch für Ihre VPN-Zugänge.")
     return redirect("/")
 
 
@@ -457,7 +467,7 @@ async def settings_test(request: Request, db: Session = Depends(get_db), admin: 
 def admins_list(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
     admins = db.scalars(select(Admin).order_by(Admin.username)).all() if admin.full_access else []
     tunnels = db.scalars(select(Tunnel).order_by(Tunnel.name)).all() if admin.full_access else []
-    return render(request, "admins.html", admins=admins, tunnels=tunnels)
+    return render(request, "admins.html", admins=admins, tunnels=tunnels, my_tunnels=visible_tunnels(db, admin))
 
 
 async def _access_from_form(request: Request, db: Session) -> tuple[bool, list[Tunnel]]:
@@ -521,6 +531,8 @@ async def admins_delete(admin_id: int, request: Request, db: Session = Depends(g
     target = db.get(Admin, admin_id)
     if target and target.id != admin.id:
         audit(db, admin.username, "admin.delete", target.username)
+        for u in target.vpn_users:  # VPN-Zugänge bleiben bestehen, nur die Kopplung entfällt
+            u.admin = None
         db.delete(target)
         db.commit()
         flash(request, f"Administrator „{target.username}“ gelöscht.")
@@ -764,7 +776,27 @@ def _get_user(db: Session, user_id: int, admin: Admin) -> VpnUser:
 @app.get("/tunnels/{tunnel_id}/users/new", response_class=HTMLResponse)
 def user_new_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                   admin: Admin = Depends(require_admin)):
-    return render(request, "user_form.html", t=_get_tunnel(db, tunnel_id, admin), f={"platform": "all"})
+    t = _get_tunnel(db, tunnel_id, admin)
+    f = {"platform": "all"}
+    if request.query_params.get("self"):  # "VPN-Zugang für mich" aus "Mein Konto"
+        f.update(full_name=admin.username, username=_self_username(db, admin, t), link_admin_id=str(admin.id))
+    return render(request, "user_form.html", t=t, f=f, link_admins=_linkable_admins(db, admin, t))
+
+
+def _linkable_admins(db: Session, admin: Admin, t: Tunnel) -> list[Admin]:
+    """Admins, deren 2FA-Schlüssel für einen VPN-Zugang in diesem Tunnel übernommen werden darf."""
+    if not admin.full_access:
+        return [admin] if admin.totp_enabled else []
+    return [a for a in db.scalars(select(Admin).order_by(Admin.username)).all() if a.totp_enabled and a.can_access(t)]
+
+
+def _self_username(db: Session, admin: Admin, t: Tunnel) -> str:
+    base = services.slugify(admin.username).replace("-", ".")[:24] or "admin"
+    taken = set(db.scalars(select(VpnUser.username)).all())
+    for candidate in (base, f"{base}-{services.slugify(t.name)[:6]}", *(f"{base}{i}" for i in range(2, 50))):
+        if candidate not in taken:
+            return candidate
+    return base
 
 
 @app.post("/tunnels/{tunnel_id}/users/new")
@@ -772,11 +804,17 @@ async def user_new_submit(tunnel_id: int, request: Request, db: Session = Depend
                           admin: Admin = Depends(require_admin)):
     t = _get_tunnel(db, tunnel_id, admin)
     form = await form_data(request)
+    linkable = _linkable_admins(db, admin, t)
+    link_admin = None
+    if form.get("link_admin_id"):
+        link_admin = next((a for a in linkable if str(a.id) == form["link_admin_id"]), None)
+        if link_admin is None:
+            raise Forbidden()
     try:
-        u = await services.create_user(db, admin.username, t, form)
+        u = await services.create_user(db, admin.username, t, form, link_admin=link_admin)
     except (ValidationError, OPNsenseError) as exc:
         db.rollback()
-        return render(request, "user_form.html", t=t, f=form, error=str(exc), status_code=400)
+        return render(request, "user_form.html", t=t, f=form, error=str(exc), link_admins=linkable, status_code=400)
     flash(request, f"Benutzer „{u.username}“ wurde angelegt.")
     return redirect(f"/users/{u.id}")
 
@@ -867,7 +905,7 @@ async def user_action(user_id: int, action: str, request: Request, db: Session =
     try:
         await fn(db, admin.username, u)
         flash(request, message)
-    except OPNsenseError as exc:
+    except (ValidationError, OPNsenseError) as exc:
         db.rollback()
         flash(request, str(exc), "error")
     return redirect(f"/users/{u.id}")

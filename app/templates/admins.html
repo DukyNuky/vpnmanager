@@ -78,6 +78,23 @@
   <div class="sub">Zugewiesene Tunnel: {{ admin.tunnels | map(attribute='name') | join(', ') or 'keine' }}</div></div></div>
 <div style="max-width:460px">
 {% endif %}
+<div class="card">
+  <h2>Meine VPN-Zugänge</h2>
+  <p class="small muted">Eigener VPN-Zugang mit demselben 2FA-Code wie die Anmeldung an diesem Tool.</p>
+  {% set mine = admin.vpn_users %}
+  {% for u in mine %}
+  <p><a href="/users/{{ u.id }}"><strong>{{ u.tunnel.name }}</strong></a> – <span class="mono small">{{ u.username }}</span>
+    {% if u.disabled %}<span class="badge error">gesperrt</span>{% endif %}
+    <a class="btn small secondary" href="/users/{{ u.id }}/package.zip">Paket (ZIP)</a></p>
+  {% endfor %}
+  {% set have = mine | map(attribute='tunnel_id') | list %}
+  {% set missing = my_tunnels | rejectattr('id', 'in', have) | list %}
+  {% if missing %}
+  <div class="actions">
+    {% for t in missing %}<a class="btn small" href="/tunnels/{{ t.id }}/users/new?self=1">VPN-Zugang für „{{ t.name }}“ anlegen</a>{% endfor %}
+  </div>
+  {% elif not mine %}<p class="small muted">Keine Tunnel verfügbar.</p>{% endif %}
+</div>
 <form method="post" action="/account/password" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
   <h2>Eigenes Passwort ändern</h2>

@@ -4,7 +4,8 @@
   <div>
     <h1>{{ u.full_name or u.username }}</h1>
     <div class="sub">Tunnel <a href="/tunnels/{{ t.id }}">{{ t.name }}</a> · Benutzername <span class="mono">{{ u.username }}</span>
-      {% if u.disabled %}<span class="badge error">gesperrt</span>{% endif %}</div>
+      {% if u.disabled %}<span class="badge error">gesperrt</span>{% endif %}
+      {% if u.admin %}<span class="badge ok">2FA gekoppelt mit Administrator „{{ u.admin.username }}“</span>{% endif %}</div>
   </div>
   <a class="btn secondary" href="/tunnels/{{ t.id }}">Zurück zum Tunnel</a>
 </div>
@@ -23,6 +24,7 @@
         {% if otp_seed %}<dt>2FA-Schlüssel</dt><dd class="mono small">{{ otp_seed }}</dd>{% endif %}
       </dl>
       {% if otp_qr %}<p class="small muted">Der Mitarbeiter scannt den QR-Code mit Microsoft oder Google Authenticator.</p>{% endif %}
+      {% if u.admin %}<p class="small muted">2FA: Es gilt derselbe Code wie bei der Anmeldung von „{{ u.admin.username }}“ an diesem Tool – kein neuer QR-Code nötig.</p>{% endif %}
       <div class="actions">
         <a class="btn" href="/users/{{ u.id }}/zugangsdaten.pdf">Zugangsdatenblatt (PDF)</a>
         <form method="post" action="/users/{{ u.id }}/done" class="inline" onsubmit="return confirm('Zugangsdaten wurden übergeben? Sie sind danach nicht mehr abrufbar.')">
@@ -52,8 +54,10 @@
     <div class="actions" style="margin-top:0">
       <form method="post" action="/users/{{ u.id }}/password" class="inline" onsubmit="return confirm('Neues Passwort erzeugen? Das alte wird sofort ungültig.')">
         <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neues Passwort</button></form>
+      {% if not u.admin %}
       <form method="post" action="/users/{{ u.id }}/otp" class="inline" onsubmit="return confirm('Neuen 2FA-Schlüssel erzeugen? Der Mitarbeiter muss neu scannen (z. B. neues Handy).')">
         <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neuer 2FA-Schlüssel</button></form>
+      {% endif %}
       <form method="post" action="/users/{{ u.id }}/reissue" class="inline" onsubmit="return confirm('Neues VPN-Profil ausstellen? Danach muss das neue Paket weitergegeben werden.')">
         <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Profil neu ausstellen</button></form>
     </div>

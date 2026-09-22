@@ -26,9 +26,20 @@
   </select>
   <div class="hint">Legt fest, welche Anleitung ins Download-Paket kommt.</div>
 
+  {% if link_admins %}
+  <label for="link_admin_id">2FA-Code</label>
+  <select id="link_admin_id" name="link_admin_id">
+    <option value="">Eigener neuer Schlüssel (QR-Code für den Mitarbeiter)</option>
+    {% for a in link_admins %}
+    <option value="{{ a.id }}" {{ 'selected' if f.link_admin_id == a.id | string }}>Wie Administrator „{{ a.username }}“ – gleicher Code wie bei der Tool-Anmeldung</option>
+    {% endfor %}
+  </select>
+  <div class="hint">Für Administratoren: Der VPN-Zugang nutzt denselben Eintrag in der Authenticator-App wie die Anmeldung an diesem Tool.</div>
+  {% endif %}
+
   <div class="alert warn" style="margin-top:20px">
-    Beim Anlegen werden automatisch ein sicheres Passwort, ein 2FA-Schlüssel und ein persönliches VPN-Zertifikat erzeugt
-    und der Benutzer auf der OPNsense angelegt.
+    Beim Anlegen werden automatisch ein sicheres Passwort, ein 2FA-Schlüssel (sofern nicht gekoppelt) und ein
+    persönliches VPN-Zertifikat erzeugt und der Benutzer auf der OPNsense angelegt.
   </div>
   <div class="actions"><button type="submit">Benutzer anlegen</button><a href="/tunnels/{{ t.id }}">Abbrechen</a></div>
 </form>

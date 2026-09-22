@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import pki
-from .db import Tunnel, VpnUser, audit, get_setting, utcnow
+from .db import Admin, Tunnel, VpnUser, audit, get_setting, utcnow
 from .opnsense import OPNsense, OPNsenseError
 from .security import decrypt, encrypt, generate_password
 
@@ -537,6 +537,22 @@ async def _kill_user_sessions(c: OPNsense, t: Tunnel, username: str) -> None:
         log.info("Keine Session für %s beendet: %s", username, exc)
 
 
+async def sync_admin_otp(db: Session, admin: Admin) -> list[str]:
+    """Überträgt den (neuen) TOTP-Schlüssel eines Admins auf seine gekoppelten VPN-Zugänge."""
+    if not admin.vpn_users or not admin.totp_secret_enc:
+        return []
+    seed, errors = decrypt(admin.totp_secret_enc), []
+    async with client(db) as c:
+        for u in admin.vpn_users:
+            try:
+                await c.set_user(u.opn_user_uuid, u.username, otp_seed=seed)
+            except OPNsenseError as exc:
+                errors.append(f"VPN-Zugang {u.username}: {exc}")
+    audit(db, admin.username, "admin.otp_sync", ", ".join(u.username for u in admin.vpn_users))
+    db.commit()
+    return errors
+
+
 # ------------------------------------------------------------------ Sperrliste (CRL)
 
 def _revoke_permanently(t: Tunnel, cert_pem: str) -> None:
@@ -577,7 +593,9 @@ def clear_pending(u: VpnUser) -> None:
     u.pending_password_enc = u.pending_otp_enc = u.pending_until = None
 
 
-async def create_user(db: Session, actor: str, t: Tunnel, form: dict) -> VpnUser:
+async def create_user(db: Session, actor: str, t: Tunnel, form: dict, link_admin: Admin | None = None) -> VpnUser:
+    """Legt einen VPN-Benutzer an. Mit link_admin wird dessen TOTP-Schlüssel übernommen (ein Authenticator-Eintrag
+    für Tool-Anmeldung und VPN)."""
     full_name = (form.get("full_name") or "").strip()
     username = (form.get("username") or "").strip().lower() or suggest_username(full_name)
     email = (form.get("email") or "").strip()
@@ -591,12 +609,15 @@ async def create_user(db: Session, actor: str, t: Tunnel, form: dict) -> VpnUser
     if db.scalar(select(VpnUser).where(VpnUser.username == username)):
         raise ValidationError(f"Der Benutzername „{username}“ ist bereits vergeben.")
 
+    if link_admin is not None and not (link_admin.totp_enabled and link_admin.totp_secret_enc):
+        raise ValidationError(f"Administrator „{link_admin.username}“ hat noch keine 2FA eingerichtet.")
+
     password = generate_password()
-    otp_seed = pyotp.random_base32()
+    otp_seed = decrypt(link_admin.totp_secret_enc) if link_admin else pyotp.random_base32()
     cert, key, not_after = pki.issue_cert(t.ca_cert, decrypt(t.ca_key_enc), username, server=False)
     u = VpnUser(
         tunnel=t, username=username, full_name=full_name, email=email, platform=platform,
-        cert_pem=cert, key_enc=encrypt(key), cert_not_after=not_after,
+        cert_pem=cert, key_enc=encrypt(key), cert_not_after=not_after, admin=link_admin,
     )
     async with client(db) as c:
         if await c.find_user(username):
@@ -604,9 +625,9 @@ async def create_user(db: Session, actor: str, t: Tunnel, form: dict) -> VpnUser
         u.opn_user_uuid = await c.add_user(
             username, password, otp_seed, full_name, email
         )
-    _set_pending(u, password, otp_seed)
+    _set_pending(u, password, None if link_admin else otp_seed)
     db.add(u)
-    audit(db, actor, "user.create", f"{username} → {t.name}")
+    audit(db, actor, "user.create", f"{username} → {t.name}" + (f" (2FA von {link_admin.username})" if link_admin else ""))
     db.commit()
     return u
 
@@ -621,6 +642,9 @@ async def reset_password(db: Session, actor: str, u: VpnUser) -> None:
 
 
 async def reset_otp(db: Session, actor: str, u: VpnUser) -> None:
+    if u.admin_id:
+        raise ValidationError("Der 2FA-Schlüssel ist an ein Administrator-Konto gekoppelt und wird dort geändert "
+                              "(Administratoren → 2FA zurücksetzen bzw. neu einrichten).")
     seed = pyotp.random_base32()
     async with client(db) as c:
         await c.set_user(u.opn_user_uuid, u.username, otp_seed=seed)

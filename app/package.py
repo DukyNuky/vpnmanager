@@ -266,7 +266,11 @@ def guide_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str, ovpn_fi
     pdf.kv("Verbindung:", tunnel.name)
 
     pdf.h2("Schritt 1: Authenticator-App einrichten (einmalig)")
-    pdf.steps(AUTHENTICATOR_STEPS)
+    if user.admin_id:
+        pdf.para("Nicht nötig: Für diesen Zugang gilt derselbe Code wie bei Ihrer Anmeldung am VPN-Manager. "
+                 "Verwenden Sie einfach den vorhandenen Eintrag in Ihrer Authenticator-App.")
+    else:
+        pdf.steps(AUTHENTICATOR_STEPS)
 
     for heading, key in _guide_sections(user.platform, windows_client):
         pdf.h2(heading)
@@ -321,6 +325,11 @@ def credentials_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str,
         grouped = " ".join(otp_seed[i:i + 4] for i in range(0, len(otp_seed), 4))
         pdf.multi_cell(0, 6, grouped, new_x="LMARGIN", new_y="NEXT")
         pdf.set_y(y + 64)
+
+    if not otp_seed and user.admin_id:
+        pdf.h2("2FA-Code")
+        pdf.para("Für diesen Zugang gilt derselbe Code wie bei der Anmeldung am VPN-Manager "
+                 "(vorhandener Eintrag in der Authenticator-App).")
 
     pdf.note(
         "Dieses Blatt ist vertraulich. Bewahren Sie es sicher auf oder vernichten Sie es nach der Einrichtung. "

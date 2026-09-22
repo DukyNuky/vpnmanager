@@ -44,6 +44,8 @@ class Admin(Base):
     tunnels: Mapped[list["Tunnel"]] = relationship(
         secondary=admin_tunnels, back_populates="admins", order_by="Tunnel.name"
     )
+    # eigene VPN-Zugänge, die denselben TOTP-Schlüssel wie die Tool-Anmeldung verwenden
+    vpn_users: Mapped[list["VpnUser"]] = relationship(back_populates="admin")
 
     def can_access(self, tunnel: "Tunnel") -> bool:
         return self.full_access or any(t.id == tunnel.id for t in self.tunnels)
@@ -122,6 +124,8 @@ class VpnUser(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tunnel_id: Mapped[int] = mapped_column(ForeignKey("tunnels.id"))
+    # gesetzt = 2FA-Schlüssel ist an diesen Administrator gekoppelt
+    admin_id: Mapped[int | None] = mapped_column(ForeignKey("admins.id", ondelete="SET NULL"))
     username: Mapped[str] = mapped_column(String(64), unique=True)
     full_name: Mapped[str] = mapped_column(String(128), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
@@ -142,6 +146,7 @@ class VpnUser(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     tunnel: Mapped[Tunnel] = relationship(back_populates="users")
+    admin: Mapped[Admin | None] = relationship(back_populates="vpn_users")
 
     @property
     def has_pending(self) -> bool:
@@ -178,6 +183,7 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 _ADDED_COLUMNS = {
     "tunnels": [("opn_crl_refid", "VARCHAR(32)"), ("revoked_serials", "TEXT DEFAULT '[]'")],
     "admins": [("full_access", "BOOLEAN NOT NULL DEFAULT 1")],
+    "vpn_users": [("admin_id", "INTEGER REFERENCES admins(id) ON DELETE SET NULL")],
 }
 
 
