@@ -75,4 +75,28 @@
     <p class="small muted" style="margin-top:16px">Bei verlorenem Gerät: <strong>Sperren</strong> oder neuen 2FA-Schlüssel + neues Passwort erzeugen.</p>
   </div>
 </div>
+<div class="card" id="mail">
+  <h2>Per E-Mail senden</h2>
+  {% if mail_ok %}
+  <form method="post" action="/users/{{ u.id }}/mail">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <p class="small">Das VPN-Paket wird als <strong>passwortgeschützte ZIP-Datei (AES-256)</strong> verschickt. Das ZIP-Passwort
+      wird nach dem Versand <strong>einmalig angezeigt</strong> und muss dem Mitarbeiter separat mitgeteilt werden (z. B. telefonisch).</p>
+    <div class="row">
+      <div>
+        <label for="to">Empfänger</label>
+        <input type="email" id="to" name="to" value="{{ u.email }}" required placeholder="mitarbeiter@firma.de">
+      </div>
+    </div>
+    {% if u.has_pending %}
+    <label class="inline" style="margin-top:14px"><input type="checkbox" name="with_credentials" value="1">
+      Zugangsdatenblatt (Passwort{{ ' + 2FA-QR-Code' if not u.admin }}) mit in die verschlüsselte ZIP-Datei legen</label>
+    <div class="hint">Praktisch für Mitarbeiter, denen Sie das Blatt nicht persönlich geben können. Dann schützt allein das ZIP-Passwort den Zugang – es darf keinesfalls per E-Mail weitergegeben werden.</div>
+    {% endif %}
+    <div class="actions"><button type="submit">Paket per E-Mail senden</button></div>
+  </form>
+  {% else %}
+  <p class="small muted">Der E-Mail-Versand ist noch nicht eingerichtet{% if admin.full_access %} – <a href="/settings#email">jetzt einrichten</a>{% endif %}.</p>
+  {% endif %}
+</div>
 {% endblock %}

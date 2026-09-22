@@ -11,3 +11,4 @@ qrcode==8.2
 pillow==12.3.0
 fpdf2==2.8.8
 itsdangerous==2.2.0
+pyzipper==0.4.0

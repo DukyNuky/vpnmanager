@@ -688,3 +688,111 @@ async def delete_user(db: Session, actor: str, u: VpnUser) -> None:
     audit(db, actor, "user.delete", f"{u.username} ({t.name})")
     db.delete(u)
     db.commit()
+
+
+# ------------------------------------------------------------------ E-Mail
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def zip_password() -> str:
+    """Gut vorlesbares Passwort für die ZIP-Datei, z. B. 'Kx7p-Qm3a-Zr9t-Hw2d'."""
+    pw = generate_password(16)
+    return "-".join(pw[i:i + 4] for i in range(0, 16, 4))
+
+
+def _package_mail(db: Session, u: VpnUser, with_credentials: bool) -> tuple[str, str]:
+    comp, support = company(db), support_contact(db)
+    t = u.tunnel
+    lines = [
+        f"Hallo {u.full_name or u.username},",
+        "",
+        f"anbei erhalten Sie Ihren persönlichen VPN-Zugang{' für ' + comp if comp else ''} (Verbindung „{t.name}“).",
+        "",
+        "Die angehängte ZIP-Datei ist mit einem Passwort geschützt. Das Passwort erhalten Sie separat von Ihrer IT "
+        "(z. B. telefonisch) – aus Sicherheitsgründen steht es nicht in dieser E-Mail.",
+        "",
+        "So geht's:",
+        "1. ZIP-Datei speichern und mit dem Passwort entpacken:",
+        "   - Windows: Der Windows-Explorer kann verschlüsselte ZIP-Dateien dieser Art nicht öffnen. Bitte 7-Zip "
+        "verwenden (https://www.7-zip.org): Rechtsklick auf die Datei → 7-Zip → Entpacken.",
+        "   - Mac: „The Unarchiver“ (kostenlos im App Store) verwenden.",
+        "   - Smartphone: Am besten auf einem PC entpacken und die .ovpn-Datei danach aufs Handy übertragen.",
+        "2. Die Datei „Anleitung.pdf“ öffnen und den Schritten folgen.",
+        "",
+    ]
+    if with_credentials:
+        lines.append(f"Ihre Zugangsdaten finden Sie in der Datei „Zugangsdaten_{u.username}.pdf“ in der ZIP-Datei.")
+    else:
+        lines.append(f"Ihr Benutzername: {u.username}")
+        if u.admin_id:
+            lines.append("Ihr Passwort erhalten Sie separat. Als 2FA-Code verwenden Sie denselben Code wie bei der "
+                         "Anmeldung am VPN-Manager.")
+        else:
+            lines.append("Ihr Passwort und den QR-Code für die Authenticator-App erhalten Sie separat von Ihrer IT.")
+    if support:
+        lines += ["", f"Bei Fragen: {support}"]
+    lines += ["", "Viele Grüße", f"{comp} IT".strip()]
+    subject = f"Ihr VPN-Zugang{' – ' + comp if comp else ''}"
+    return subject, "\n".join(lines)
+
+
+async def send_package_mail(db: Session, actor: str, u: VpnUser, to: str, with_credentials: bool) -> str:
+    """Schickt das VPN-Paket als AES-verschlüsselte ZIP per Mail. Rückgabe: ZIP-Passwort (manuell weitergeben)."""
+    from starlette.concurrency import run_in_threadpool
+
+    from . import mailer, package
+
+    cfg = mailer.smtp_config(db)
+    if cfg is None:
+        raise ValidationError("E-Mail-Versand ist nicht eingerichtet (Einstellungen → E-Mail).")
+    to = to.strip()
+    if not EMAIL_RE.fullmatch(to):
+        raise ValidationError("Bitte eine gültige E-Mail-Adresse angeben.")
+    creds = None
+    if with_credentials:
+        if not u.has_pending:
+            raise ValidationError("Die Zugangsdaten sind nicht mehr im Tool vorhanden – bitte zuerst ein neues "
+                                  "Passwort erzeugen oder ohne Zugangsdaten senden.")
+        creds = package.credentials_pdf(u.tunnel, u, company(db), support_contact(db),
+                                        decrypt(u.pending_password_enc), decrypt(u.pending_otp_enc))
+    password = zip_password()
+    filename, data = package.build_zip(u.tunnel, u, company(db), support_contact(db), windows_client(db),
+                                       password=password, credentials_pdf_bytes=creds)
+    subject, body = _package_mail(db, u, bool(creds))
+    await run_in_threadpool(mailer.send_mail, cfg, to, subject, body, [(filename, data, "application/zip")])
+    if not u.email:
+        u.email = to
+    audit(db, actor, "user.mail", f"{u.username} → {to}" + (" (inkl. Zugangsdaten)" if creds else ""))
+    db.commit()
+    return password
+
+
+async def send_info_mail(db: Session, actor: str, t: Tunnel, subject: str, body: str,
+                         include_disabled: bool) -> tuple[list[str], list[str]]:
+    """Info-Mail an alle Benutzer eines Tunnels mit E-Mail-Adresse (einzeln, keine sichtbaren Mitempfänger)."""
+    from starlette.concurrency import run_in_threadpool
+
+    from . import mailer
+
+    cfg = mailer.smtp_config(db)
+    if cfg is None:
+        raise ValidationError("E-Mail-Versand ist nicht eingerichtet (Einstellungen → E-Mail).")
+    subject, body = subject.strip(), body.strip()
+    if not subject or not body:
+        raise ValidationError("Bitte Betreff und Text angeben.")
+    recipients = [u for u in t.users if u.email and (include_disabled or not u.disabled)]
+    if not recipients:
+        raise ValidationError("Kein Benutzer dieses Tunnels hat eine E-Mail-Adresse hinterlegt.")
+    sent, failed = [], []
+    for u in recipients:
+        text = body.replace("{name}", u.full_name or u.username).replace("{benutzername}", u.username)
+        try:
+            await run_in_threadpool(mailer.send_mail, cfg, u.email, subject, text)
+            sent.append(u.email)
+        except mailer.MailError as exc:
+            failed.append(f"{u.email}: {exc}")
+    audit(db, actor, "tunnel.info_mail", f"{t.name}: „{subject}“ an {len(sent)} Empfänger"
+          + (f", {len(failed)} fehlgeschlagen" if failed else ""))
+    db.commit()
+    return sent, failed

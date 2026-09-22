@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div><h1>E-Mail versendet</h1><div class="sub">{{ u.full_name or u.username }} · Tunnel {{ t.name }}</div></div>
+  <a class="btn secondary" href="/users/{{ u.id }}">Zurück zum Benutzer</a>
+</div>
+<div class="card" style="max-width:720px;border-color:#f1d98e">
+  <p>Das VPN-Paket wurde an <strong>{{ to }}</strong> gesendet{% if with_credentials %}, inklusive Zugangsdatenblatt{% endif %}.</p>
+  <h2>ZIP-Passwort</h2>
+  <p><span class="secret" style="font-size:24px">{{ zip_password }}</span></p>
+  <div class="alert warn">
+    Dieses Passwort wird <strong>nur jetzt</strong> angezeigt und nirgends gespeichert. Teilen Sie es dem Mitarbeiter
+    <strong>auf einem anderen Weg</strong> mit – telefonisch, per SMS oder persönlich, <strong>nicht per E-Mail</strong>.
+    Geht es verloren, das Paket einfach erneut senden (dann mit neuem Passwort).
+  </div>
+  <p class="small muted">Hinweis für den Mitarbeiter: Der Windows-Explorer kann diese ZIP-Datei nicht öffnen – 7-Zip verwenden
+     (steht auch in der E-Mail). Die Bindestriche gehören zum Passwort.</p>
+  <div class="actions"><a class="btn" href="/users/{{ u.id }}">Fertig</a></div>
+</div>
+{% endblock %}

@@ -23,6 +23,12 @@ Den Code fragt OpenVPN Connect in einem eigenen Feld ab ("static-challenge").
 - Benutzer anlegen mit **einem Formular**: Passwort, TOTP-Schlüssel, Client-Zertifikat und OPNsense-Benutzer werden automatisch erzeugt
 - Download-Paket (ZIP): `.ovpn`-Profil, PDF-Anleitung (Windows/macOS/Android/iOS), LIESMICH
 - Zugangsdatenblatt (PDF mit Passwort + QR-Code), getrennt vom Paket, wird nach Übergabe aus dem Tool gelöscht
+- **E-Mail-Versand (SMTP)**, im Tool einrichtbar inkl. Test-Mail:
+  - VPN-Paket per Mail als **AES-256-verschlüsselte ZIP**. Das ZIP-Passwort wird nur einmal im Tool angezeigt und
+    muss separat weitergegeben werden, z. B. telefonisch. Optional liegt das Zugangsdatenblatt mit in der ZIP
+  - Info-Mails an alle Benutzer eines Tunnels (einzeln versendet, Platzhalter `{name}`, `{benutzername}`)
+  - Hinweis: Der Windows-Explorer und die iOS-App "Dateien" öffnen AES-ZIPs nicht. Nötig ist 7-Zip bzw. The Unarchiver
+    (steht in der Mail)
 - Status: Dienst läuft/gestoppt, verbundene Benutzer mit IP, Traffic, Verbindungsdauer, Verbindung trennen
 - Benutzer sperren/entsperren, neues Passwort, neuer 2FA-Schlüssel, Profil neu ausstellen, löschen
 - Sperren wirkt sofort über eine Sperrliste (CRL) je Tunnel, die das Tool signiert und auf die OPNsense lädt.

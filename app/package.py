@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pyotp
+import pyzipper
 import qrcode
 from fpdf import FPDF
 
@@ -341,11 +342,22 @@ def credentials_pdf(tunnel: Tunnel, user: VpnUser, company: str, support: str,
 
 
 def build_zip(tunnel: Tunnel, user: VpnUser, company: str, support: str,
-              windows_client: str = "connect") -> tuple[str, bytes]:
+              windows_client: str = "connect", password: str | None = None,
+              credentials_pdf_bytes: bytes | None = None) -> tuple[str, bytes]:
+    """ZIP-Paket. Mit password AES-256-verschlüsselt (für den Mailversand);
+    credentials_pdf_bytes legt zusätzlich das Zugangsdatenblatt hinein."""
     base = profile_basename(company, tunnel, user)
     ovpn_name = f"{base}.ovpn"
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    if password:
+        zf = pyzipper.AESZipFile(buf, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES)
+        zf.setpassword(password.encode())
+        zf.setencryption(pyzipper.WZ_AES, nbits=256)
+    else:
+        zf = zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED)
+    with zf:
+        if credentials_pdf_bytes:
+            zf.writestr(f"Zugangsdaten_{user.username}.pdf", credentials_pdf_bytes)
         zf.writestr(ovpn_name, render_ovpn(tunnel, user, company))
         zf.writestr("Anleitung.pdf", guide_pdf(tunnel, user, company, support, ovpn_name, windows_client))
         zf.writestr("LIESMICH.txt", (

@@ -81,6 +81,64 @@
 </div>
 </div>
 </div>
+<form method="post" action="/settings/smtp" class="card" id="email">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>E-Mail-Versand (SMTP)</h2>
+  <p class="small muted">Für den Versand der VPN-Pakete (als passwortgeschützte ZIP-Datei) und für Info-Mails an die Benutzer eines Tunnels.</p>
+  <div class="row">
+    <div>
+      <label for="smtp_host">SMTP-Server</label>
+      <input type="text" id="smtp_host" name="smtp_host" value="{{ smtp.smtp_host }}" placeholder="smtp.office365.com">
+    </div>
+    <div>
+      <label for="smtp_port">Port</label>
+      <input type="number" id="smtp_port" name="smtp_port" value="{{ smtp.smtp_port }}" min="1" max="65535">
+    </div>
+    <div>
+      <label for="smtp_security">Verschlüsselung</label>
+      <select id="smtp_security" name="smtp_security">
+        {% for key, label in smtp_security_options.items() %}<option value="{{ key }}" {{ 'selected' if smtp.smtp_security == key }}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="smtp_username">Benutzername</label>
+      <input type="text" id="smtp_username" name="smtp_username" value="{{ smtp.smtp_username }}" autocomplete="off" placeholder="vpn@firma.de">
+      <div class="hint">Leer lassen, wenn der Server keine Anmeldung verlangt.</div>
+    </div>
+    <div>
+      <label for="smtp_password">Passwort</label>
+      <input type="password" id="smtp_password" name="smtp_password" autocomplete="new-password" placeholder="{{ '•••••••• (gespeichert)' if smtp.has_password else '' }}">
+      <div class="hint">Leer lassen, um das gespeicherte Passwort zu behalten. Wird verschlüsselt gespeichert.</div>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="smtp_sender">Absender-Adresse</label>
+      <input type="email" id="smtp_sender" name="smtp_sender" value="{{ smtp.smtp_sender }}" placeholder="vpn@firma.de">
+    </div>
+    <div>
+      <label for="smtp_sender_name">Absender-Name</label>
+      <input type="text" id="smtp_sender_name" name="smtp_sender_name" value="{{ smtp.smtp_sender_name }}" placeholder="IT {{ s.company or 'Firma' }}">
+    </div>
+  </div>
+  <label class="inline" style="margin-top:14px"><input type="checkbox" name="smtp_verify_tls" value="1" {{ 'checked' if smtp.verify_tls }}> TLS-Zertifikat des Mailservers prüfen</label>
+
+  <div class="row" style="margin-top:8px">
+    <div>
+      <label for="test_to">Test-Mail an</label>
+      <input type="email" id="test_to" name="test_to" value="" placeholder="ich@firma.de">
+    </div>
+    <div style="align-self:end">
+      <button type="button" class="secondary" hx-post="/settings/smtp/test" hx-include="#email" hx-target="#smtp-result">
+        Test-Mail senden <span class="htmx-indicator">…</span></button>
+    </div>
+  </div>
+  <div id="smtp-result" style="margin-top:12px"></div>
+  <div class="actions"><button type="submit">E-Mail-Einstellungen speichern</button></div>
+</form>
+
 <form method="post" action="/settings/tunnel-defaults" class="card" id="vorgaben">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
   <h2>Vorgaben für neue Tunnel</h2>

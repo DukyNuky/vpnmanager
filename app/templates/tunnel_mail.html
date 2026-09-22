@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Info-Mail an Benutzer</h1><div class="sub">Tunnel {{ t.name }}</div></div>
+  <a class="btn secondary" href="/tunnels/{{ t.id }}">Zurück</a>
+</div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% set with_mail = t.users | selectattr('email') | list %}
+{% if not mail_ok %}
+<div class="card"><p>Der E-Mail-Versand ist noch nicht eingerichtet{% if admin.full_access %} – <a href="/settings#email">jetzt einrichten</a>{% endif %}.</p></div>
+{% else %}
+<form method="post" class="card" style="max-width:760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <p class="small muted">Geht einzeln an alle Benutzer dieses Tunnels mit hinterlegter E-Mail-Adresse
+     ({{ with_mail | length }} von {{ t.users | length }}) – die Empfänger sehen sich gegenseitig nicht.</p>
+  <label for="subject">Betreff</label>
+  <input type="text" id="subject" name="subject" value="{{ f.subject or '' }}" required placeholder="Wartung VPN am Samstag">
+  <label for="body">Text</label>
+  <textarea id="body" name="body" required style="min-height:220px;font-family:inherit" placeholder="Hallo {name},&#10;&#10;am Samstag von 8–10 Uhr ist das VPN wegen Wartungsarbeiten nicht erreichbar.&#10;&#10;Viele Grüße&#10;Ihre IT">{{ f.body or '' }}</textarea>
+  <div class="hint">Platzhalter: <span class="mono">{name}</span> (Name), <span class="mono">{benutzername}</span> (VPN-Benutzername).</div>
+  <label class="inline" style="margin-top:14px"><input type="checkbox" name="include_disabled" value="1" {{ 'checked' if f.include_disabled }}> Auch an gesperrte Benutzer senden</label>
+  <div class="actions"><button type="submit" onclick="return confirm('Info-Mail jetzt versenden?')">Senden</button></div>
+</form>
+{% endif %}
+{% endblock %}

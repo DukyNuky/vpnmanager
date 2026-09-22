@@ -13,11 +13,13 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import escape
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import package, services
+from . import mailer, package, services
 from .config import settings
 from .db import Admin, AuditLog, Tunnel, VpnUser, admin_count, audit, get_db, get_setting, init_db, set_setting, utcnow
 from .opnsense import OPNsense, OPNsenseError
@@ -81,6 +83,7 @@ templates.env.filters["dt"] = fmt_dt
 templates.env.filters["bytes"] = fmt_bytes
 templates.env.globals["platforms"] = package.PLATFORM_LABELS
 templates.env.globals["windows_clients"] = package.WINDOWS_CLIENTS
+templates.env.globals["smtp_security_options"] = mailer.SECURITY_OPTIONS
 
 
 def csrf_token(request: Request) -> str:
@@ -392,7 +395,85 @@ def _settings_ctx(db: Session) -> dict:
 async def settings_form(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
     auth_servers = (await _auth_servers(db, timeout=5))[0] if services.opn_configured(db) else []
     return render(request, "settings.html", s=_settings_ctx(db), tpl=services.tunnel_template(db),
-                  auth_servers=auth_servers)
+                  auth_servers=auth_servers, smtp=_smtp_ctx(db), me=admin)
+
+
+SMTP_FIELDS = ("smtp_host", "smtp_port", "smtp_security", "smtp_username", "smtp_sender", "smtp_sender_name")
+
+
+def _smtp_ctx(db: Session) -> dict:
+    ctx = {k: get_setting(db, k, "") for k in SMTP_FIELDS}
+    ctx["smtp_port"] = ctx["smtp_port"] or "587"
+    ctx["smtp_security"] = ctx["smtp_security"] or "starttls"
+    ctx["has_password"] = bool(get_setting(db, "smtp_password_enc"))
+    ctx["verify_tls"] = get_setting(db, "smtp_verify_tls", "1") == "1"
+    return ctx
+
+
+def _smtp_from_form(db: Session, form: dict) -> mailer.SmtpConfig:
+    try:
+        port = int(form.get("smtp_port") or 0)
+    except ValueError:
+        port = 0
+    if not form.get("smtp_host", "").strip():
+        raise ValidationError("Bitte den SMTP-Server angeben.")
+    if not 1 <= port <= 65535:
+        raise ValidationError("Ungültiger SMTP-Port.")
+    if form.get("smtp_security") not in mailer.SECURITY_OPTIONS:
+        raise ValidationError("Ungültige Verschlüsselungsart.")
+    if not services.EMAIL_RE.fullmatch(form.get("smtp_sender", "").strip()):
+        raise ValidationError("Bitte eine gültige Absender-Adresse angeben.")
+    password = form.get("smtp_password", "")
+    if not password and form.get("smtp_username", "").strip():
+        password = decrypt(get_setting(db, "smtp_password_enc")) or ""
+    return mailer.SmtpConfig(
+        host=form["smtp_host"].strip(), port=port, security=form["smtp_security"],
+        username=form.get("smtp_username", "").strip(), password=password,
+        sender=form["smtp_sender"].strip(), sender_name=form.get("smtp_sender_name", "").strip(),
+        verify_tls=bool(form.get("smtp_verify_tls")),
+    )
+
+
+@app.post("/settings/smtp")
+async def settings_smtp(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_full_admin)):
+    form = await form_data(request)
+    try:
+        cfg = _smtp_from_form(db, form)
+    except ValidationError as exc:
+        flash(request, f"E-Mail-Einstellungen nicht gespeichert: {exc}", "error")
+        return redirect("/settings#email")
+    for key, value in (("smtp_host", cfg.host), ("smtp_port", str(cfg.port)), ("smtp_security", cfg.security),
+                       ("smtp_username", cfg.username), ("smtp_sender", cfg.sender),
+                       ("smtp_sender_name", cfg.sender_name), ("smtp_verify_tls", "1" if cfg.verify_tls else "0")):
+        set_setting(db, key, value)
+    if form.get("smtp_password"):
+        set_setting(db, "smtp_password_enc", encrypt(form["smtp_password"]))
+    if not cfg.username:
+        set_setting(db, "smtp_password_enc", None)
+    audit(db, admin.username, "settings.smtp", f"{cfg.host}:{cfg.port} ({cfg.security}), Absender {cfg.sender}")
+    db.commit()
+    flash(request, "E-Mail-Einstellungen gespeichert.")
+    return redirect("/settings#email")
+
+
+@app.post("/settings/smtp/test", response_class=HTMLResponse)
+async def settings_smtp_test(request: Request, db: Session = Depends(get_db),
+                             admin: Admin = Depends(require_full_admin)):
+    form = await form_data(request)
+    to = form.get("test_to", "").strip()
+    try:
+        cfg = _smtp_from_form(db, form)
+        if not services.EMAIL_RE.fullmatch(to):
+            raise ValidationError("Bitte eine Empfänger-Adresse für die Test-Mail angeben.")
+        await run_in_threadpool(
+            mailer.send_mail, cfg, to, f"Test-Mail vom {settings.app_title}",
+            f"Diese Test-Mail bestätigt, dass der E-Mail-Versand des {settings.app_title} funktioniert.\n\n"
+            f"Server: {cfg.host}:{cfg.port} ({cfg.security})\nAbsender: {cfg.sender}\n",
+        )
+    except (ValidationError, mailer.MailError) as exc:
+        return HTMLResponse(f'<div class="alert error">{escape(str(exc))}</div>')
+    return HTMLResponse(f'<div class="alert ok">Test-Mail an {escape(to)} wurde versendet. '
+                        f'Nicht vergessen: <strong>Speichern</strong>.</div>')
 
 
 @app.post("/settings/tunnel-defaults")
@@ -822,7 +903,7 @@ async def user_new_submit(tunnel_id: int, request: Request, db: Session = Depend
 @app.get("/users/{user_id}", response_class=HTMLResponse)
 def user_detail(user_id: int, request: Request, db: Session = Depends(get_db), admin: Admin = Depends(require_admin)):
     u = _get_user(db, user_id, admin)
-    ctx = {"u": u, "t": u.tunnel}
+    ctx = {"u": u, "t": u.tunnel, "mail_ok": mailer.mail_configured(db)}
     if u.has_pending:
         ctx["password"] = decrypt(u.pending_password_enc)
         seed = decrypt(u.pending_otp_enc)
@@ -856,6 +937,45 @@ def user_credentials_pdf(user_id: int, request: Request, db: Session = Depends(g
     db.commit()
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="Zugangsdaten_{u.username}.pdf"'})
+
+
+@app.post("/users/{user_id}/mail", response_class=HTMLResponse)
+async def user_mail(user_id: int, request: Request, db: Session = Depends(get_db),
+                    admin: Admin = Depends(require_admin)):
+    form = await form_data(request)
+    u = _get_user(db, user_id, admin)
+    try:
+        password = await services.send_package_mail(db, admin.username, u, form.get("to", ""),
+                                                    with_credentials=bool(form.get("with_credentials")))
+    except (ValidationError, mailer.MailError, OPNsenseError) as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(f"/users/{u.id}")
+    return render(request, "mail_sent.html", u=u, t=u.tunnel, zip_password=password,
+                  to=form.get("to", "").strip(), with_credentials=bool(form.get("with_credentials")))
+
+
+@app.get("/tunnels/{tunnel_id}/mail", response_class=HTMLResponse)
+def tunnel_mail_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
+                     admin: Admin = Depends(require_admin)):
+    t = _get_tunnel(db, tunnel_id, admin)
+    return render(request, "tunnel_mail.html", t=t, f={}, mail_ok=mailer.mail_configured(db))
+
+
+@app.post("/tunnels/{tunnel_id}/mail", response_class=HTMLResponse)
+async def tunnel_mail_submit(tunnel_id: int, request: Request, db: Session = Depends(get_db),
+                             admin: Admin = Depends(require_admin)):
+    form = await form_data(request)
+    t = _get_tunnel(db, tunnel_id, admin)
+    try:
+        sent, failed = await services.send_info_mail(db, admin.username, t, form.get("subject", ""),
+                                                     form.get("body", ""), bool(form.get("include_disabled")))
+    except ValidationError as exc:
+        return render(request, "tunnel_mail.html", t=t, f=form, error=str(exc), mail_ok=True, status_code=400)
+    flash(request, f"Info-Mail an {len(sent)} Empfänger versendet.")
+    for e in failed:
+        flash(request, f"Nicht zugestellt: {e}", "error")
+    return redirect(f"/tunnels/{t.id}")
 
 
 USER_ACTIONS = {

@@ -7,6 +7,7 @@
   </div>
   <div class="actions" style="margin:0">
     <a class="btn" href="/tunnels/{{ t.id }}/users/new">+ Benutzer anlegen</a>
+    <a class="btn secondary" href="/tunnels/{{ t.id }}/mail">Info-Mail</a>
     {% if admin.full_access %}<a class="btn secondary" href="/tunnels/{{ t.id }}/edit">Einstellungen</a>{% endif %}
     <form method="post" action="/tunnels/{{ t.id }}/restart" class="inline" onsubmit="return confirm('Tunnel neu starten? Verbundene Benutzer werden kurz getrennt.')">
       <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neu starten</button>
