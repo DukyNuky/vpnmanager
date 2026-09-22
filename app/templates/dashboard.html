@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Übersicht</h1>
+    <div class="sub">VPN-Tunnel auf der OPNsense und verbundene Mitarbeiter</div>
+  </div>
+  {% if configured %}<a class="btn" href="/tunnels/new">+ Neuer Tunnel</a>{% endif %}
+</div>
+
+{% if not configured %}
+<div class="card">
+  <h2>Willkommen!</h2>
+  <p>Als Erstes wird die Verbindung zur OPNsense eingerichtet (URL, API-Key und Secret).</p>
+  <a class="btn" href="/settings">OPNsense einrichten</a>
+</div>
+{% elif not tunnels %}
+<div class="card">
+  <h2>Noch kein Tunnel vorhanden</h2>
+  <p>Legen Sie einen VPN-Tunnel an. Das Tool erstellt Zertifikate, OpenVPN-Instanz und auf Wunsch die Firewall-Regeln auf der OPNsense.</p>
+  <a class="btn" href="/tunnels/new">Ersten Tunnel anlegen</a>
+</div>
+{% else %}
+<div hx-get="/partials/overview" hx-trigger="load, every 20s" hx-swap="innerHTML">
+  <div class="grid">
+    {% for t in tunnels %}
+    <a class="card tunnel-card" href="/tunnels/{{ t.id }}">
+      <div class="title"><strong>{{ t.name }}</strong><span class="badge">Status wird geladen…</span></div>
+      <div class="muted small">{{ t.public_host }}:{{ t.port }}/{{ t.proto | upper }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if log_entries %}
+<div class="card">
+  <h2>Letzte Aktivitäten</h2>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Zeit</th><th>Admin</th><th>Aktion</th><th>Details</th></tr>
+    {% for e in log_entries %}
+    <tr><td class="small">{{ e.ts | dt }}</td><td>{{ e.actor }}</td><td class="mono small">{{ e.action }}</td><td class="small">{{ e.detail }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div class="actions"><a href="/log">Vollständiges Protokoll</a></div>
+</div>
+{% endif %}
+{% endblock %}

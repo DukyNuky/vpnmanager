@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Neuer Benutzer</h1><div class="sub">Tunnel: {{ t.name }}</div></div>
+  <a class="btn secondary" href="/tunnels/{{ t.id }}">Zurück</a>
+</div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+<form method="post" class="card" style="max-width:720px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <label for="full_name">Name des Mitarbeiters</label>
+  <input type="text" id="full_name" name="full_name" value="{{ f.full_name or '' }}" required autofocus placeholder="Max Mustermann">
+  <div class="row">
+    <div>
+      <label for="username">Benutzername</label>
+      <input type="text" id="username" name="username" value="{{ f.username or '' }}" pattern="[a-z0-9][a-z0-9._\-]{1,31}" placeholder="max.mustermann">
+      <div class="hint">Wird automatisch aus dem Namen erzeugt.</div>
+    </div>
+    <div>
+      <label for="email">E-Mail (optional)</label>
+      <input type="email" id="email" name="email" value="{{ f.email or '' }}">
+    </div>
+  </div>
+  <label for="platform">Anleitung für</label>
+  <select id="platform" name="platform">
+    {% for key, label in platforms.items() %}<option value="{{ key }}" {{ 'selected' if f.platform == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <div class="hint">Legt fest, welche Anleitung ins Download-Paket kommt.</div>
+
+  <div class="alert warn" style="margin-top:20px">
+    Beim Anlegen werden automatisch ein sicheres Passwort, ein 2FA-Schlüssel und ein persönliches VPN-Zertifikat erzeugt
+    und der Benutzer auf der OPNsense angelegt.
+  </div>
+  <div class="actions"><button type="submit">Benutzer anlegen</button><a href="/tunnels/{{ t.id }}">Abbrechen</a></div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const name = document.getElementById('full_name');
+  const user = document.getElementById('username');
+  let touched = user.value !== '';
+  user.addEventListener('input', () => { touched = user.value !== ''; });
+  const map = {'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss'};
+  name.addEventListener('input', () => {
+    if (touched) return;
+    user.value = name.value.toLowerCase().replace(/[äöüß]/g, c => map[c])
+      .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .split(/\s+/).map(p => p.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')).filter(Boolean).join('.').slice(0, 32);
+  });
+})();
+</script>
+{% endblock %}

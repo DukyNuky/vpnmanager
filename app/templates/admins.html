@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><h1>Administratoren</h1><div class="sub">Zugänge zu diesem Tool (nicht die VPN-Benutzer)</div></div></div>
+<div class="grid" style="grid-template-columns: minmax(0,3fr) minmax(0,2fr)">
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <tr><th>Benutzer</th><th>2FA</th><th>Letzte Anmeldung</th><th></th></tr>
+    {% for a in admins %}
+    <tr>
+      <td><strong>{{ a.username }}</strong>{% if a.id == admin.id %} <span class="muted small">(Sie)</span>{% endif %}</td>
+      <td>{% if a.totp_enabled %}<span class="badge ok">aktiv</span>{% else %}<span class="badge warn">ausstehend</span>{% endif %}</td>
+      <td class="small">{{ a.last_login | dt }}</td>
+      <td style="text-align:right">
+        {% if a.id != admin.id %}
+        <form method="post" action="/admins/{{ a.id }}/reset-2fa" class="inline" onsubmit="return confirm('2FA von {{ a.username }} zurücksetzen?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="small secondary">2FA zurücksetzen</button></form>
+        <form method="post" action="/admins/{{ a.id }}/delete" class="inline" onsubmit="return confirm('Administrator {{ a.username }} löschen?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="small danger">Löschen</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+<div>
+<form method="post" action="/admins/new" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>Administrator hinzufügen</h2>
+  <label for="nu">Benutzername</label><input type="text" id="nu" name="username" required autocomplete="off">
+  <label for="np">Startpasswort</label><input type="password" id="np" name="password" required minlength="12" autocomplete="new-password">
+  <label for="np2">Wiederholen</label><input type="password" id="np2" name="password2" required minlength="12" autocomplete="new-password">
+  <div class="hint">Die 2FA wird bei der ersten Anmeldung eingerichtet.</div>
+  <div class="actions"><button type="submit">Hinzufügen</button></div>
+</form>
+<form method="post" action="/account/password" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>Eigenes Passwort ändern</h2>
+  <label for="cp">Aktuelles Passwort</label><input type="password" id="cp" name="current" required autocomplete="current-password">
+  <label for="pp">Neues Passwort</label><input type="password" id="pp" name="password" required minlength="12" autocomplete="new-password">
+  <label for="pp2">Wiederholen</label><input type="password" id="pp2" name="password2" required minlength="12" autocomplete="new-password">
+  <div class="actions"><button type="submit">Ändern</button></div>
+</form>
+</div>
+</div>
+{% endblock %}

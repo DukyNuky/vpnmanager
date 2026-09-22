@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t.name }}</h1>
+    <div class="sub mono">{{ t.public_host }}:{{ t.port }}/{{ t.proto | upper }}</div>
+  </div>
+  <div class="actions" style="margin:0">
+    <a class="btn" href="/tunnels/{{ t.id }}/users/new">+ Benutzer anlegen</a>
+    <a class="btn secondary" href="/tunnels/{{ t.id }}/edit">Einstellungen</a>
+    <form method="post" action="/tunnels/{{ t.id }}/restart" class="inline" onsubmit="return confirm('Tunnel neu starten? Verbundene Benutzer werden kurz getrennt.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neu starten</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <dl class="kv">
+    <dt>Modus</dt><dd>{{ 'Full-Tunnel (gesamter Verkehr)' if t.mode == 'full' else 'Split-Tunnel' }}</dd>
+    {% if t.mode == 'split' %}<dt>Freigegebene Netze</dt><dd class="mono">{{ t.route_list | join(', ') }}</dd>{% endif %}
+    <dt>Tunnel-Netz</dt><dd class="mono">{{ t.network }}</dd>
+    {% if t.dns_list %}<dt>DNS</dt><dd class="mono">{{ t.dns_list | join(', ') }}{% if t.dns_domain %} ({{ t.dns_domain }}){% endif %}</dd>{% endif %}
+    <dt>Anmeldung</dt><dd>Zertifikat + Passwort + 2FA ({{ t.auth_server }})</dd>
+    <dt>Firewall-Regeln</dt><dd>{{ 'automatisch verwaltet' if t.fw_rule_list else 'manuell' }}</dd>
+  </dl>
+</div>
+
+<div id="status" hx-get="/tunnels/{{ t.id }}/status" hx-trigger="load, every 15s" hx-swap="innerHTML">
+  <div class="card muted">Status wird geladen…</div>
+</div>
+{% endblock %}

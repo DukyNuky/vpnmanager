@@ -1,0 +1,71 @@
+{% for kind, msg in flashes %}<div class="alert {{ kind }}">{{ msg }}</div>{% endfor %}
+{% if error %}<div class="alert error">Status nicht abrufbar: {{ error }}</div>{% endif %}
+
+{% if st %}
+<div class="card">
+  <div class="page-head" style="margin-bottom:8px">
+    <h2 style="margin:0">Status</h2>
+    {% if st.running %}<span class="badge ok"><span class="dot"></span>Dienst läuft</span>
+    {% elif st.known %}<span class="badge error"><span class="dot"></span>Dienst gestoppt</span>
+    {% else %}<span class="badge error"><span class="dot"></span>Instanz nicht aktiv</span>{% endif %}
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="value">{{ st.sessions | length }}</div><div class="label">verbunden</div></div>
+    <div class="stat"><div class="value">{{ t.users | length }}</div><div class="label">Benutzer</div></div>
+    <div class="stat"><div class="value">{{ st.sessions | sum(attribute='bytes_received') | bytes }}</div><div class="label">empfangen</div></div>
+    <div class="stat"><div class="value">{{ st.sessions | sum(attribute='bytes_sent') | bytes }}</div><div class="label">gesendet</div></div>
+  </div>
+
+  {% if st.sessions %}
+  <h3 style="margin-top:22px">Aktive Verbindungen</h3>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Benutzer</th><th>Von (öffentliche IP)</th><th>VPN-IP</th><th>Verbunden seit</th><th>Empfangen / Gesendet</th><th></th></tr>
+    {% for s in st.sessions %}
+    <tr>
+      <td><strong>{{ s.username }}</strong></td>
+      <td class="mono small">{{ s.real_address }}</td>
+      <td class="mono small">{{ s.virtual_address }}</td>
+      <td class="small">{{ s.connected_since }}</td>
+      <td class="small">{{ s.bytes_received | bytes }} / {{ s.bytes_sent | bytes }}</td>
+      <td style="text-align:right">
+        <button class="small danger" hx-post="/tunnels/{{ t.id }}/kill" hx-vals='{"session_id": "{{ s.real_address }}"}'
+                hx-target="#status" hx-confirm="Verbindung von {{ s.username }} trennen?">Trennen</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="page-head" style="margin-bottom:8px">
+    <h2 style="margin:0">Benutzer</h2>
+    <a class="btn small" href="/tunnels/{{ t.id }}/users/new">+ Benutzer anlegen</a>
+  </div>
+  {% if t.users %}
+  <div class="table-wrap">
+  <table>
+    <tr><th>Name</th><th>Benutzername</th><th>Status</th><th>Zuletzt online</th><th></th></tr>
+    {% for u in t.users %}
+    <tr>
+      <td><a href="/users/{{ u.id }}"><strong>{{ u.full_name or u.username }}</strong></a></td>
+      <td class="mono small">{{ u.username }}</td>
+      <td>
+        {% if u.disabled %}<span class="badge error">gesperrt</span>
+        {% elif u.username in online %}<span class="badge ok"><span class="dot"></span>online</span>
+        {% else %}<span class="badge">offline</span>{% endif %}
+        {% if u.has_pending %}<span class="badge warn">Zugangsdaten nicht übergeben</span>{% endif %}
+      </td>
+      <td class="small">{{ u.last_seen | dt }}</td>
+      <td style="text-align:right"><a class="btn small secondary" href="/users/{{ u.id }}/package.zip">Paket (ZIP)</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">Noch keine Benutzer. Legen Sie den ersten Mitarbeiter-Zugang an.</p>
+  {% endif %}
+</div>

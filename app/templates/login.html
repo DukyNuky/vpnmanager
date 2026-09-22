@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ app_title }}</h1>
+  <p class="muted">Bitte melden Sie sich an.</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="username">Benutzername</label>
+    <input type="text" id="username" name="username" value="{{ username or '' }}" required autofocus autocomplete="username">
+    <label for="password">Passwort</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password">
+    <div class="actions"><button type="submit">Anmelden</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ 'Neuer VPN-Tunnel' if new else 'Tunnel bearbeiten: ' ~ t.name }}</h1>
+    <div class="sub">{{ 'Legt Zertifikate, OpenVPN-Instanz und optional Firewall-Regeln auf der OPNsense an.' if new else 'Änderungen werden sofort auf der OPNsense übernommen.' }}</div>
+  </div>
+  {% if not new %}<a class="btn secondary" href="/tunnels/{{ t.id }}">Zurück</a>{% endif %}
+</div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form method="post" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+  <h2>Allgemein</h2>
+  <div class="row">
+    <div>
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" value="{{ f.name or '' }}" maxlength="48" required placeholder="z. B. Mitarbeiter">
+    </div>
+    <div>
+      <label for="public_host">Öffentliche Adresse</label>
+      <input type="text" id="public_host" name="public_host" value="{{ f.public_host or '' }}" required placeholder="vpn.firma.de">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="port">Port</label>
+      <input type="number" id="port" name="port" value="{{ f.port or '' }}" min="1" max="65535" required>
+    </div>
+    <div>
+      <label for="proto">Protokoll</label>
+      {% if new %}
+      <select id="proto" name="proto">
+        <option value="udp" {{ 'selected' if f.proto == 'udp' }}>UDP (empfohlen)</option>
+        <option value="tcp" {{ 'selected' if f.proto == 'tcp' }}>TCP</option>
+      </select>
+      {% else %}
+      <input type="text" value="{{ f.proto | upper }}" disabled>
+      {% endif %}
+    </div>
+    <div>
+      <label for="network">Tunnel-Netz</label>
+      {% if new %}
+      <input type="text" id="network" name="network" value="{{ f.network or '' }}" required>
+      <div class="hint">Interner Adressbereich für VPN-Clients, darf im Firmennetz nicht vorkommen.</div>
+      {% else %}
+      <input type="text" value="{{ f.network }}" disabled>
+      {% endif %}
+    </div>
+  </div>
+
+  <h2 style="margin-top:28px">Was dürfen die Mitarbeiter erreichen?</h2>
+  <div class="segmented">
+    <label><input type="radio" name="mode" value="split" {{ 'checked' if f.mode != 'full' }}>
+      <strong>Split-Tunnel</strong><span class="small muted">Nur die unten eingetragenen Firmennetze laufen über das VPN, Internet weiter direkt. (empfohlen)</span></label>
+    <label><input type="radio" name="mode" value="full" {{ 'checked' if f.mode == 'full' }}>
+      <strong>Full-Tunnel</strong><span class="small muted">Der gesamte Datenverkehr läuft über die Firma, auch Internet.</span></label>
+  </div>
+  <label for="routes">Freigegebene Firmennetze</label>
+  <textarea id="routes" name="routes" placeholder="192.168.1.0/24">{{ f.routes or '' }}</textarea>
+  <div class="hint">Ein Netz pro Zeile, z. B. <span class="mono">192.168.1.0/24</span>. Beim Split-Tunnel Pflicht; bei aktiven Firewall-Regeln wird der Zugriff auf diese Netze erlaubt.</div>
+
+  <div class="row">
+    <div>
+      <label for="dns_servers">DNS-Server für VPN-Clients</label>
+      <input type="text" id="dns_servers" name="dns_servers" value="{{ (f.dns_servers or '') | replace('\n', ', ') }}" placeholder="192.168.1.1">
+      <div class="hint">Optional, z. B. interner DNS/Domaincontroller. Mehrere mit Komma trennen.</div>
+    </div>
+    <div>
+      <label for="dns_domain">DNS-Domain</label>
+      <input type="text" id="dns_domain" name="dns_domain" value="{{ f.dns_domain or '' }}" placeholder="firma.local">
+    </div>
+  </div>
+
+  <h2 style="margin-top:28px">Anmeldung</h2>
+  <div class="row">
+    <div>
+      <label for="auth_server">Authentifizierungsserver (mit 2FA)</label>
+      {% if new %}
+      <select id="auth_server" name="auth_server" required>
+        {% for a in auth_servers %}
+        <option value="{{ a }}" {{ 'selected' if f.auth_server == a or (not f.auth_server and a != 'Local Database') }}>{{ a }}</option>
+        {% endfor %}
+      </select>
+      <div class="hint">Server vom Typ „Local + Timebased One Time Password“, siehe Seite OPNsense.</div>
+      {% else %}
+      <input type="text" value="{{ f.auth_server }}" disabled>
+      {% endif %}
+    </div>
+    <div>
+      <label for="session_hours">Sitzungsdauer (Stunden)</label>
+      <input type="number" id="session_hours" name="session_hours" value="{{ f.session_hours or 12 }}" min="1" max="168">
+      <div class="hint">So lange bleibt eine Verbindung auch bei Netzwechsel (WLAN ↔ Mobilfunk) ohne erneuten 2FA-Code bestehen.</div>
+    </div>
+  </div>
+
+  {% if new %}
+  <label class="inline" style="margin-top:22px"><input type="checkbox" name="fw_rules" value="1" {{ 'checked' if f.fw_rules }}>
+    Firewall-Regeln automatisch anlegen (Einwahl auf WAN + Zugriff der VPN-Clients)</label>
+  <div class="hint">Für Full-Tunnel muss das ausgehende NAT auf „Automatisch“ oder „Hybrid“ stehen (Standard).</div>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit">{{ 'Tunnel anlegen' if new else 'Speichern' }}</button>
+    <a href="{{ '/' if new else '/tunnels/' ~ t.id }}">Abbrechen</a>
+  </div>
+</form>
+
+{% if not new %}
+<form method="post" action="/tunnels/{{ t.id }}/delete" class="card danger-zone">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>Tunnel löschen</h2>
+  <p>Entfernt die OpenVPN-Instanz, Zertifikate, Firewall-Regeln und <strong>alle {{ t.users | length }} Benutzer</strong> dieses Tunnels von der OPNsense. Das kann nicht rückgängig gemacht werden.</p>
+  <label for="confirm_name">Zur Bestätigung den Namen „{{ t.name }}“ eingeben</label>
+  <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" style="max-width:320px">
+  <div class="actions"><button type="submit" class="danger">Endgültig löschen</button></div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><h1>Protokoll</h1><div class="sub">Die letzten 500 Aktionen</div></div></div>
+<div class="card table-wrap">
+  <table>
+    <tr><th>Zeit</th><th>Admin</th><th>Aktion</th><th>Details</th></tr>
+    {% for e in entries %}
+    <tr><td class="small" style="white-space:nowrap">{{ e.ts | dt }}</td><td>{{ e.actor }}</td><td class="mono small">{{ e.action }}</td><td class="small">{{ e.detail }}</td></tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">Noch keine Einträge.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

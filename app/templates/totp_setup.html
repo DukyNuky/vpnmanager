@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:720px;margin:0 auto">
+  <h1>Zwei-Faktor-Anmeldung einrichten</h1>
+  <p>Für den Zugang zum {{ app_title }} ist eine Zwei-Faktor-Anmeldung vorgeschrieben. Scannen Sie den QR-Code mit einer
+     Authenticator-App (z. B. Microsoft Authenticator, Google Authenticator) und geben Sie den angezeigten Code ein.</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <div class="credentials">
+    <div class="qr">{{ qr_svg | safe }}</div>
+    <div>
+      <p class="small muted">Manuelle Eingabe des Schlüssels:</p>
+      <div class="secret">{{ secret }}</div>
+      <form method="post" style="margin-top:18px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <label for="code">Code aus der App</label>
+        <input type="text" id="code" name="code" inputmode="numeric" maxlength="7" required autofocus autocomplete="one-time-code" style="max-width:180px">
+        <div class="actions"><button type="submit">Aktivieren</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

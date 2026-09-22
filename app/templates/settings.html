@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><h1>OPNsense-Verbindung</h1><div class="sub">Zugang zur API der Firewall und allgemeine Angaben</div></div></div>
+
+<div class="grid" style="grid-template-columns: minmax(0,3fr) minmax(0,2fr)">
+<div>
+<form method="post" action="/settings" class="card" id="settings-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <h2>API-Zugang</h2>
+  <label for="opn_url">URL der OPNsense</label>
+  <input type="url" id="opn_url" name="opn_url" value="{{ s.opn_url }}" placeholder="https://192.168.1.1" required>
+  <div class="hint">Adresse der Weboberfläche aus Sicht dieses Containers, ggf. mit Port (z. B. https://10.0.0.1:4443).</div>
+
+  <div class="row">
+    <div>
+      <label for="api_key">API-Key</label>
+      <input type="password" id="api_key" name="api_key" autocomplete="off" placeholder="{{ '•••••••• (gespeichert)' if s.has_key else '' }}">
+    </div>
+    <div>
+      <label for="api_secret">API-Secret</label>
+      <input type="password" id="api_secret" name="api_secret" autocomplete="off" placeholder="{{ '•••••••• (gespeichert)' if s.has_key else '' }}">
+    </div>
+  </div>
+  <div class="hint">Leer lassen, um die gespeicherten Werte zu behalten. Key und Secret werden verschlüsselt gespeichert.</div>
+
+  <label class="inline"><input type="checkbox" name="verify_tls" value="1" {{ 'checked' if s.verify_tls }}> TLS-Zertifikat der OPNsense prüfen</label>
+  <div class="hint">Bei selbstsigniertem Zertifikat der OPNsense deaktivieren.</div>
+
+  <div class="actions">
+    <button type="button" class="secondary" hx-post="/settings/test" hx-include="#settings-form" hx-target="#test-result">
+      Verbindung testen <span class="htmx-indicator">…</span>
+    </button>
+  </div>
+  <div id="test-result" style="margin-top:14px"></div>
+
+  <h2 style="margin-top:28px">Allgemein</h2>
+  <label for="public_host">Öffentliche Adresse für VPN-Verbindungen</label>
+  <input type="text" id="public_host" name="public_host" value="{{ s.public_host }}" placeholder="vpn.firma.de">
+  <div class="hint">DNS-Name oder feste IP, unter der die OPNsense aus dem Internet erreichbar ist. Vorschlagswert für neue Tunnel.</div>
+  <label for="company">Firmenname</label>
+  <input type="text" id="company" name="company" value="{{ s.company }}" placeholder="Muster GmbH">
+  <div class="hint">Erscheint in Anleitungen, Profilnamen und in der Authenticator-App.</div>
+  <label for="support">Ansprechpartner / Support</label>
+  <input type="text" id="support" name="support" value="{{ s.support }}" placeholder="IT-Abteilung, Tel. 0123 456789, it@firma.de">
+  <div class="hint">Wird in der Anleitung für Mitarbeiter angegeben.</div>
+
+  <div class="actions"><button type="submit">Speichern</button></div>
+</form>
+</div>
+
+<div>
+<div class="card">
+  <h2>Einrichtung auf der OPNsense</h2>
+  <h3>1. API-Benutzer anlegen</h3>
+  <p class="small">Unter <em>System → Zugang → Benutzer</em> einen Benutzer (z. B. <span class="mono">vpnmanager</span>) anlegen
+     und ihm folgende Rechte geben:</p>
+  <ul class="small">
+    <li>VPN: OpenVPN: Instances</li>
+    <li>Status: OpenVPN</li>
+    <li>System: Trust: Authorities</li>
+    <li>System: Trust: Certificates</li>
+    <li>System: Access: Users</li>
+    <li>Firewall: Rules (optional, für automatische Regeln)</li>
+  </ul>
+  <p class="small">Dann beim Benutzer unter <em>API-Keys</em> einen Schlüssel erzeugen. Die heruntergeladene Datei enthält Key und Secret.</p>
+  <p class="small muted">Hinweis: Wer Benutzer verwalten darf, hat faktisch Administratorrechte. Den API-Key deshalb nur in diesem Tool hinterlegen.</p>
+
+  <h3>2. Authentifizierungsserver mit 2FA anlegen</h3>
+  <p class="small">Unter <em>System → Zugang → Server</em> einen Server hinzufügen:</p>
+  <ul class="small">
+    <li>Typ: <strong>Local + Timebased One Time Password</strong></li>
+    <li>Name: z. B. <span class="mono">VPN-TOTP</span></li>
+    <li>Rest auf Standard lassen (Code vor dem Passwort).</li>
+  </ul>
+  <p class="small">Diesen Server wählen Sie beim Anlegen eines Tunnels aus.</p>
+</div>
+</div>
+</div>
+{% endblock %}

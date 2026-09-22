@@ -1,0 +1,20 @@
+{% if error %}<div class="alert error">Status nicht abrufbar: {{ error }}</div>{% endif %}
+<div class="grid">
+  {% for t in tunnels %}
+  {% set st = status.get(t.opn_instance_uuid) %}
+  <a class="card tunnel-card" href="/tunnels/{{ t.id }}">
+    <div class="title">
+      <strong>{{ t.name }}</strong>
+      {% if error %}<span class="badge">unbekannt</span>
+      {% elif st and st.running %}<span class="badge ok"><span class="dot"></span>läuft</span>
+      {% else %}<span class="badge error"><span class="dot"></span>gestoppt</span>{% endif %}
+    </div>
+    <div class="muted small">{{ t.public_host }}:{{ t.port }}/{{ t.proto | upper }} · {{ 'Full-Tunnel' if t.mode == 'full' else 'Split-Tunnel' }}</div>
+    <div class="stats" style="margin-top:14px">
+      <div class="stat"><div class="value">{{ st.sessions | length if st else 0 }}</div><div class="label">verbunden</div></div>
+      <div class="stat"><div class="value">{{ t.users | length }}</div><div class="label">Benutzer</div></div>
+      <div class="stat"><div class="value">{{ t.users | selectattr('disabled') | list | length }}</div><div class="label">gesperrt</div></div>
+    </div>
+  </a>
+  {% endfor %}
+</div>

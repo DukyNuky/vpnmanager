@@ -1,0 +1,11 @@
+services:
+  vpnmanager:
+    build: .
+    image: vpnmanager:latest
+    container_name: vpnmanager
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8443}:8443"
+    env_file: .env
+    volumes:
+      - ./data:/data

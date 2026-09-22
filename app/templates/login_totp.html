@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Bestätigungscode</h1>
+  <p class="muted">Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App ein.</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="code">Code</label>
+    <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus autocomplete="one-time-code">
+    <div class="actions"><button type="submit">Bestätigen</button> <a href="/login">Abbrechen</a></div>
+  </form>
+</div>
+{% endblock %}

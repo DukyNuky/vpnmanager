@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_title }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'>
+{% if admin and admin.totp_enabled %}
+<header class="top">
+  <div class="inner">
+    <a class="brand" href="/">{{ app_title }}</a>
+    {% set p = request.url.path %}
+    <nav>
+      <a href="/" class="{{ 'active' if p == '/' or p.startswith('/tunnels') or p.startswith('/users') }}">Übersicht</a>
+      <a href="/settings" class="{{ 'active' if p.startswith('/settings') }}">OPNsense</a>
+      <a href="/admins" class="{{ 'active' if p.startswith('/admins') }}">Administratoren</a>
+      <a href="/log" class="{{ 'active' if p.startswith('/log') }}">Protokoll</a>
+    </nav>
+    <div class="user">
+      <span>{{ admin.username }}</span>
+      <form method="post" action="/logout" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="small" type="submit">Abmelden</button>
+      </form>
+    </div>
+  </div>
+</header>
+{% endif %}
+<main class="{% block main_class %}{% endblock %}">
+  {% for kind, msg in flashes %}<div class="alert {{ kind }}">{{ msg }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

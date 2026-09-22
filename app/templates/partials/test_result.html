@@ -1,0 +1,20 @@
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if checks %}
+<ul class="check-list">
+  {% for label, ok, msg in checks %}
+  <li>{% if ok %}<span class="badge ok">OK</span>{% else %}<span class="badge error">Fehler</span>{% endif %}
+      <span><strong>{{ label }}</strong>{% if not ok %} – <span class="small">{{ msg }}</span>{% endif %}</span></li>
+  {% endfor %}
+</ul>
+{% if all_ok %}
+  <div class="alert ok" style="margin-top:10px">Verbindung erfolgreich, alle benötigten Rechte vorhanden. Nicht vergessen: <strong>Speichern</strong>.</div>
+{% elif only_fw_missing %}
+  <div class="alert warn" style="margin-top:10px">Verbindung ok. Ohne Firewall-Rechte müssen die Regeln manuell angelegt werden.</div>
+{% endif %}
+{% if auth_servers %}
+  <p class="small" style="margin-top:12px"><strong>Authentifizierungsserver:</strong> {{ auth_servers | join(', ') }}</p>
+  {% if not totp_servers %}
+  <div class="alert warn">Noch kein Server mit 2FA gefunden. Bitte auf der OPNsense einen Server vom Typ „Local + Timebased One Time Password“ anlegen.</div>
+  {% endif %}
+{% endif %}
+{% endif %}

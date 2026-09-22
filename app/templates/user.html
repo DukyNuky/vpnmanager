@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ u.full_name or u.username }}</h1>
+    <div class="sub">Tunnel <a href="/tunnels/{{ t.id }}">{{ t.name }}</a> · Benutzername <span class="mono">{{ u.username }}</span>
+      {% if u.disabled %}<span class="badge error">gesperrt</span>{% endif %}</div>
+  </div>
+  <a class="btn secondary" href="/tunnels/{{ t.id }}">Zurück zum Tunnel</a>
+</div>
+
+{% if u.has_pending %}
+<div class="card" style="border-color:#f1d98e">
+  <h2>Zugangsdaten übergeben</h2>
+  <p>Diese Daten werden <strong>nur bis zur Übergabe</strong> angezeigt (längstens bis {{ u.pending_until | dt }}).
+     Übergeben Sie sie getrennt vom VPN-Paket, z. B. ausgedruckt oder persönlich.</p>
+  <div class="credentials">
+    {% if otp_qr %}<div class="qr">{{ otp_qr | safe }}</div>{% endif %}
+    <div>
+      <dl class="kv">
+        <dt>Benutzername</dt><dd><span class="secret">{{ u.username }}</span></dd>
+        {% if password %}<dt>Passwort</dt><dd><span class="secret">{{ password }}</span></dd>{% endif %}
+        {% if otp_seed %}<dt>2FA-Schlüssel</dt><dd class="mono small">{{ otp_seed }}</dd>{% endif %}
+      </dl>
+      {% if otp_qr %}<p class="small muted">Der Mitarbeiter scannt den QR-Code mit Microsoft oder Google Authenticator.</p>{% endif %}
+      <div class="actions">
+        <a class="btn" href="/users/{{ u.id }}/zugangsdaten.pdf">Zugangsdatenblatt (PDF)</a>
+        <form method="post" action="/users/{{ u.id }}/done" class="inline" onsubmit="return confirm('Zugangsdaten wurden übergeben? Sie sind danach nicht mehr abrufbar.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Übergeben – aus Tool entfernen</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid">
+  <div class="card">
+    <h2>VPN-Paket</h2>
+    <p>ZIP mit VPN-Profil (<span class="mono">.ovpn</span>), Schritt-für-Schritt-Anleitung ({{ platforms[u.platform] }}) und Kurzinfo. Enthält <strong>kein</strong> Passwort.</p>
+    <div class="actions"><a class="btn" href="/users/{{ u.id }}/package.zip">Paket herunterladen (ZIP)</a></div>
+    <dl class="kv small" style="margin-top:18px">
+      <dt>Angelegt</dt><dd>{{ u.created_at | dt }}</dd>
+      <dt>Zuletzt online</dt><dd>{{ u.last_seen | dt }}</dd>
+      <dt>Zertifikat gültig bis</dt><dd>{{ u.cert_not_after | dt }}</dd>
+      {% if u.email %}<dt>E-Mail</dt><dd>{{ u.email }}</dd>{% endif %}
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Verwalten</h2>
+    <div class="actions" style="margin-top:0">
+      <form method="post" action="/users/{{ u.id }}/password" class="inline" onsubmit="return confirm('Neues Passwort erzeugen? Das alte wird sofort ungültig.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neues Passwort</button></form>
+      <form method="post" action="/users/{{ u.id }}/otp" class="inline" onsubmit="return confirm('Neuen 2FA-Schlüssel erzeugen? Der Mitarbeiter muss neu scannen (z. B. neues Handy).')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neuer 2FA-Schlüssel</button></form>
+      <form method="post" action="/users/{{ u.id }}/reissue" class="inline" onsubmit="return confirm('Neues VPN-Profil ausstellen? Danach muss das neue Paket weitergegeben werden.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Profil neu ausstellen</button></form>
+    </div>
+    <div class="actions">
+      {% if u.disabled %}
+      <form method="post" action="/users/{{ u.id }}/enable" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button>Entsperren</button></form>
+      {% else %}
+      <form method="post" action="/users/{{ u.id }}/disable" class="inline" onsubmit="return confirm('Benutzer sperren? Eine bestehende Verbindung wird getrennt.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="danger">Sperren</button></form>
+      {% endif %}
+      <form method="post" action="/users/{{ u.id }}/delete" class="inline" onsubmit="return confirm('Benutzer {{ u.username }} endgültig löschen?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="danger">Löschen</button></form>
+    </div>
+    <p class="small muted" style="margin-top:16px">Bei verlorenem Gerät: <strong>Sperren</strong> oder neuen 2FA-Schlüssel + neues Passwort erzeugen.</p>
+  </div>
+</div>
+{% endblock %}

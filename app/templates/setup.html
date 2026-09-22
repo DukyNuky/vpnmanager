@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Ersteinrichtung</h1>
+  <p class="muted">Legen Sie den ersten Administrator an. Anschließend wird die Zwei-Faktor-Anmeldung eingerichtet.</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="username">Benutzername</label>
+    <input type="text" id="username" name="username" value="{{ username or '' }}" required autofocus autocomplete="username">
+    <label for="password">Passwort</label>
+    <input type="password" id="password" name="password" required minlength="12" autocomplete="new-password">
+    <div class="hint">Mindestens 12 Zeichen.</div>
+    <label for="password2">Passwort wiederholen</label>
+    <input type="password" id="password2" name="password2" required minlength="12" autocomplete="new-password">
+    <div class="actions"><button type="submit">Administrator anlegen</button></div>
+  </form>
+</div>
+{% endblock %}
