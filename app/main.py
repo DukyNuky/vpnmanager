@@ -641,6 +641,12 @@ async def tunnel_restart(tunnel_id: int, request: Request, db: Session = Depends
     return redirect(f"/tunnels/{t.id}")
 
 
+@app.get("/tunnels/{tunnel_id}/delete", response_class=HTMLResponse)
+def tunnel_delete_form(tunnel_id: int, request: Request, db: Session = Depends(get_db),
+                       admin: Admin = Depends(require_admin)):
+    return render(request, "tunnel_delete.html", t=_get_tunnel(db, tunnel_id))
+
+
 @app.post("/tunnels/{tunnel_id}/delete")
 async def tunnel_delete(tunnel_id: int, request: Request, db: Session = Depends(get_db),
                         admin: Admin = Depends(require_admin)):
@@ -648,12 +654,12 @@ async def tunnel_delete(tunnel_id: int, request: Request, db: Session = Depends(
     t = _get_tunnel(db, tunnel_id)
     if form.get("confirm_name", "").strip() != t.name:
         flash(request, "Zum Löschen bitte den Tunnelnamen exakt eingeben.", "error")
-        return redirect(f"/tunnels/{t.id}/edit")
+        return redirect(f"/tunnels/{t.id}/delete")
     try:
-        errors = await services.delete_tunnel(db, admin.username, t)
+        errors = await services.delete_tunnel(db, admin.username, t, force=bool(form.get("force")))
     except OPNsenseError as exc:
         flash(request, str(exc), "error")
-        return redirect(f"/tunnels/{t.id}/edit")
+        return redirect(f"/tunnels/{t.id}/delete")
     flash(request, f"Tunnel „{t.name}“ und alle zugehörigen Benutzer wurden gelöscht.")
     for e in errors:
         flash(request, f"Hinweis: {e}", "warn")

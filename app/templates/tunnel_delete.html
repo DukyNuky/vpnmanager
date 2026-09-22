@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Tunnel löschen: {{ t.name }}</h1><div class="sub mono">{{ t.public_host }}:{{ t.port }}/{{ t.proto | upper }}</div></div>
+  <a class="btn secondary" href="/tunnels/{{ t.id }}">Abbrechen</a>
+</div>
+
+<form method="post" action="/tunnels/{{ t.id }}/delete" class="card danger-zone" style="max-width:760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <p>Folgendes wird <strong>endgültig</strong> entfernt:</p>
+  <ul>
+    <li>die OpenVPN-Instanz auf der OPNsense (verbundene Benutzer werden sofort getrennt)</li>
+    <li>CA, Server-Zertifikat und tls-crypt-Key dieses Tunnels</li>
+    {% if t.fw_rule_list %}<li>die {{ t.fw_rule_list | length }} automatisch angelegten Firewall-Regeln</li>{% endif %}
+    <li><strong>{{ t.users | length }} Benutzer</strong>{% if t.users %}: {{ t.users | map(attribute='username') | join(', ') }}{% endif %}
+      – inkl. der Benutzerkonten auf der OPNsense</li>
+  </ul>
+  <p class="small muted">Ausgegebene VPN-Profile funktionieren danach nicht mehr. Das kann nicht rückgängig gemacht werden.</p>
+
+  <label for="confirm_name">Zur Bestätigung den Namen „{{ t.name }}“ eingeben</label>
+  <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" required style="max-width:320px">
+
+  <label class="inline" style="margin-top:16px"><input type="checkbox" name="force" value="1">
+    Auch löschen, wenn die OPNsense nicht erreichbar ist (dann nur im Tool entfernen)</label>
+  <div class="hint">Nur für Sonderfälle, z. B. wenn die Firewall ausgetauscht wurde. Reste auf der OPNsense müssen dann manuell entfernt werden.</div>
+
+  <div class="actions"><button type="submit" class="danger">Endgültig löschen</button><a href="/tunnels/{{ t.id }}">Abbrechen</a></div>
+</form>
+{% endblock %}

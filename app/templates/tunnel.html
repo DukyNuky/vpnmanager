@@ -11,6 +11,7 @@
     <form method="post" action="/tunnels/{{ t.id }}/restart" class="inline" onsubmit="return confirm('Tunnel neu starten? Verbundene Benutzer werden kurz getrennt.')">
       <input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Neu starten</button>
     </form>
+    <a class="btn danger" href="/tunnels/{{ t.id }}/delete">Löschen</a>
   </div>
 </div>
 

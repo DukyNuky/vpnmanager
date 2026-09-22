@@ -116,14 +116,11 @@
 </form>
 
 {% if not new %}
-<form method="post" action="/tunnels/{{ t.id }}/delete" class="card danger-zone">
-  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+<div class="card danger-zone">
   <h2>Tunnel löschen</h2>
-  <p>Entfernt die OpenVPN-Instanz, Zertifikate, Firewall-Regeln und <strong>alle {{ t.users | length }} Benutzer</strong> dieses Tunnels von der OPNsense. Das kann nicht rückgängig gemacht werden.</p>
-  <label for="confirm_name">Zur Bestätigung den Namen „{{ t.name }}“ eingeben</label>
-  <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" style="max-width:320px">
-  <div class="actions"><button type="submit" class="danger">Endgültig löschen</button></div>
-</form>
+  <p>Entfernt den Tunnel mit allen {{ t.users | length }} Benutzern von der OPNsense.</p>
+  <a class="btn danger" href="/tunnels/{{ t.id }}/delete">Tunnel löschen…</a>
+</div>
 {% endif %}
 {% endblock %}
 {% block scripts %}

@@ -401,16 +401,34 @@ async def update_tunnel(db: Session, actor: str, t: Tunnel, data: dict) -> list[
     return notes
 
 
-async def delete_tunnel(db: Session, actor: str, t: Tunnel) -> list[str]:
-    async with client(db) as c:
-        errors = []
-        for u in t.users:
+async def delete_tunnel(db: Session, actor: str, t: Tunnel, force: bool = False) -> list[str]:
+    """Löscht Tunnel, Benutzer und alle OPNsense-Objekte. Ist die OPNsense nicht erreichbar, wird abgebrochen –
+    außer mit force=True, dann wird der Tunnel nur im Tool entfernt."""
+    errors: list[str] = []
+    try:
+        c = client(db)
+    except OPNsenseError as exc:
+        if not force:
+            raise
+        c, errors = None, [str(exc)]
+    if c is not None:
+        async with c:
             try:
-                await c.delete_user(u.opn_user_uuid)
+                await c.post("openvpn/instances/search", {"current": 1, "rowCount": 1})
+                reachable = True
             except OPNsenseError as exc:
-                errors.append(f"Benutzer {u.username}: {exc}")
-        errors += await _cleanup_tunnel(c, t)
-    audit(db, actor, "tunnel.delete", t.name)
+                if not force:
+                    raise OPNsenseError(f"{exc} – der Tunnel wurde nicht gelöscht.") from exc
+                reachable = False
+                errors.append(f"OPNsense nicht erreichbar, Objekte dort bitte manuell entfernen: {exc}")
+            if reachable:
+                for u in t.users:
+                    try:
+                        await c.delete_user(u.opn_user_uuid)
+                    except OPNsenseError as exc:
+                        errors.append(f"Benutzer {u.username}: {exc}")
+                errors += await _cleanup_tunnel(c, t)
+    audit(db, actor, "tunnel.delete", t.name + (" (nur im Tool)" if force and errors else ""))
     db.delete(t)
     db.commit()
     return errors
