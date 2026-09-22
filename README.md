@@ -24,21 +24,36 @@ Den Code fragt OpenVPN Connect in einem eigenen Feld ab ("static-challenge").
 
 ## Installation beim Kunden
 
+Es wird **keine `.env`-Datei benötigt**. Alle Variablen sind optional und haben Standardwerte:
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `HOST_PORT` | `8443` | Port auf dem Docker-Host |
+| `SECRET_KEY` | *(automatisch)* | Schlüssel für gespeicherte Geheimnisse. Fehlt er, wird er beim ersten Start in `/data/.secret_key` erzeugt |
+| `APP_TITLE` | `VPN-Manager` | Name in der Oberfläche |
+| `TZ` | `Europe/Berlin` | Zeitzone |
+| `TLS_ENABLED` | `true` | HTTPS im Container (selbstsigniert, in `/data/tls`) |
+
+**Dockhand / Portainer:** Das Repo als Git-Stack hinzufügen und deployen. Variablen bei Bedarf in den
+Stack-Variablen setzen.
+
+**Kommandozeile:**
+
 ```bash
 git clone <repo> vpnmanager && cd vpnmanager
-cp .env.example .env
-sed -i "s/^SECRET_KEY=$/SECRET_KEY=$(openssl rand -hex 32)/" .env   # oder manuell setzen
-# optional HOST_PORT in .env anpassen (Standard 8443)
+cp .env.example .env    # optional, um Werte anzupassen
 docker compose up -d --build
 ```
 
 Danach `https://<docker-host>:8443` öffnen. Der erste Aufruf führt zur Ersteinrichtung (Admin + 2FA).
-Das Tool erzeugt beim ersten Start ein selbstsigniertes Zertifikat in `data/tls/`. Ein eigenes Zertifikat
-kann als `data/tls/cert.pem` und `data/tls/key.pem` abgelegt werden. Läuft ein Reverse-Proxy davor,
-`TLS_ENABLED=false` setzen.
 
-> **Wichtig:** `SECRET_KEY` und den Ordner `data/` sichern. Ohne den Key sind die gespeicherten
-> Schlüssel (CA, Client-Zertifikate, API-Secret) nicht mehr lesbar.
+Alle Daten liegen im Docker-Volume `vpnmanager-data` (Datenbank, Schlüssel, TLS-Zertifikat).
+Ein eigenes TLS-Zertifikat kann als `/data/tls/cert.pem` und `/data/tls/key.pem` hinterlegt werden
+(z. B. per `docker cp`). Läuft ein Reverse-Proxy davor, `TLS_ENABLED=false` setzen.
+
+> **Wichtig:** Das Volume `vpnmanager-data` sichern (bzw. den gesetzten `SECRET_KEY`). Ohne den Schlüssel sind
+> CA, Client-Zertifikate und das API-Secret nicht mehr lesbar. Ein einmal verwendeter `SECRET_KEY` darf
+> nicht geändert werden.
 
 ## Vorbereitung auf der OPNsense (einmalig)
 

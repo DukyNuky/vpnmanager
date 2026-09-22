@@ -6,6 +6,14 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8443}:8443"
-    env_file: .env
+    environment:
+      # Optional – ohne Wert wird beim ersten Start ein Schlüssel im Volume erzeugt (/data/.secret_key)
+      SECRET_KEY: ${SECRET_KEY:-}
+      APP_TITLE: ${APP_TITLE:-VPN-Manager}
+      TZ: ${TZ:-Europe/Berlin}
+      TLS_ENABLED: ${TLS_ENABLED:-true}
     volumes:
-      - ./data:/data
+      - vpnmanager-data:/data
+
+volumes:
+  vpnmanager-data:
